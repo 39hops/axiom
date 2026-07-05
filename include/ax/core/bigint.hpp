@@ -1,0 +1,42 @@
+#pragma once
+/** @file bigint.hpp Arbitrary-precision signed integer. */
+#include <compare>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace ax {
+
+/**
+ * Arbitrary-precision signed integer.
+ * Representation: sign + little-endian 64-bit limbs, no leading zero limbs;
+ * zero is the empty limb vector with non-negative sign.
+ */
+class bigint {
+ public:
+  /// Zero.
+  bigint() = default;
+  /// From built-in signed integer.
+  bigint(long long v);  // NOLINT(google-explicit-constructor)
+  /// From decimal string, optional leading '-'. Throws std::invalid_argument.
+  explicit bigint(std::string_view dec);
+
+  /// True iff value is zero.
+  bool is_zero() const noexcept { return limbs_.empty(); }
+  /// True iff value is negative.
+  bool is_negative() const noexcept { return neg_; }
+  /// Decimal representation.
+  std::string to_string() const;
+
+  friend bool operator==(const bigint&, const bigint&) = default;
+  friend std::strong_ordering operator<=>(const bigint& a, const bigint& b);
+
+ private:
+  bool neg_ = false;                 ///< Sign; false for zero.
+  std::vector<std::uint64_t> limbs_; ///< Little-endian magnitude.
+  void trim();                       ///< Drop leading zero limbs, fix -0.
+};
+
+}  // namespace ax
