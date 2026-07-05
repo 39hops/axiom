@@ -18,6 +18,7 @@ add_library(axiom STATIC
   src/st/htest.cpp
   src/st/reg.cpp
   src/st/mcmc.cpp
+  src/st/ts.cpp
   src/num/root.cpp
   src/num/quad.cpp
   src/num/ode.cpp
