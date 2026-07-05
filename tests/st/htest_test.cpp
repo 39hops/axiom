@@ -44,6 +44,22 @@ TEST(t_test_1sample, one_sided_p_values_sum_to_one) {
   EXPECT_NEAR(two.p_value, 2.0 * std::min(lo.p_value, hi.p_value), 1e-12);
 }
 
+TEST(t_test_1sample, zero_variance_throws) {
+  std::vector<double> xs{2.0, 2.0, 2.0};
+  EXPECT_THROW((void)t_test(xs, 2.0), std::invalid_argument);
+}
+
+TEST(t_test_2sample, both_constant_throws) {
+  std::vector<double> xs{1.0, 1.0};
+  std::vector<double> ys{2.0, 2.0};
+  EXPECT_THROW((void)t_test(xs, ys), std::invalid_argument);
+}
+
+TEST(anova_oneway, zero_within_group_variance_throws) {
+  std::vector<std::vector<double>> groups{{1, 1, 1}, {2, 2, 2}};
+  EXPECT_THROW((void)anova_oneway(groups), std::invalid_argument);
+}
+
 TEST(t_test_1sample, too_small_throws) {
   std::vector<double> xs{1.0};
   EXPECT_THROW((void)t_test(xs, 0.0), std::invalid_argument);

@@ -140,7 +140,10 @@ glm_result glm_fit(const la::mat& x, const la::vec& y, glm_family family,
         mu[i] = std::clamp(mu[i], kmu_eps, 1.0 - kmu_eps);
         w[i] = std::max(mu[i] * (1.0 - mu[i]), kmu_eps);
       } else {
-        mu[i] = std::max(std::exp(eta), kmu_eps);
+        // clamp eta so mu (and hence X'WX) stays finite; mirrors the
+        // logistic mu clamp. exp(30) ~ 1e13 leaves headroom for the
+        // weighted normal equations.
+        mu[i] = std::max(std::exp(std::min(eta, 30.0)), kmu_eps);
         w[i] = mu[i];
       }
       z[i] = eta + (y[i] - mu[i]) / w[i];

@@ -154,6 +154,19 @@ TEST(glm_poisson, recovers_simulated_coefficients) {
   EXPECT_LT(std::abs(r.beta[1] - 0.7), 3.0 * r.stderrs[1]);
 }
 
+TEST(glm_poisson, extreme_predictor_no_overflow) {
+  // huge predictor values would overflow exp(eta) without the eta clamp;
+  // fit must return finite coefficients (converged or not)
+  mat x(4, 1);
+  vec y{1, 2, 1000, 2000};
+  double xs[] = {0.0, 1.0, 500.0, 1000.0};
+  for (std::size_t i = 0; i < 4; ++i) x(i, 0) = xs[i];
+  auto r = glm_fit(x, y, glm_family::poisson);
+  for (std::size_t j = 0; j < r.beta.size(); ++j)
+    EXPECT_TRUE(std::isfinite(r.beta[j]));
+  EXPECT_TRUE(std::isfinite(r.deviance));
+}
+
 TEST(glm_poisson, negative_response_throws) {
   mat x(3, 1);
   vec y{1, -1, 2};

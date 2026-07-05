@@ -13,7 +13,7 @@ the only dependency, and it is test-only (fetched by CMake).
 | `ax::core` | Arbitrary-precision `bigint` (Karatsuba multiplication), exact `rational`, number theory (Miller-Rabin, Pollard rho, modular arithmetic, CRT), FFT/NTT |
 | `ax::par`  | Thread pool, `parallel_for` / `parallel_reduce` |
 | `ax::la`   | Dense `mat`/`vec`, cache-blocked multithreaded matmul, LU, Cholesky, Householder QR, least squares |
-| `ax::st`   | PCG64 RNG (ziggurat normal), special functions (lgamma, erf, incomplete gamma/beta), 15 probability distributions with pdf/cdf/quantile/sample, descriptive statistics |
+| `ax::st`   | PCG64 RNG (ziggurat normal), special functions (lgamma, erf, incomplete gamma/beta), 15 probability distributions with pdf/cdf/quantile/sample, descriptive statistics, hypothesis tests (t, chi-square, ANOVA, KS), OLS with inference, GLMs (logistic/Poisson via IRLS), Metropolis-Hastings MCMC, time series (ACF/PACF, AR/ARMA, periodogram) |
 | `ax::num`  | Adaptive Gauss-Kronrod and tanh-sinh quadrature, RK45 (Dormand-Prince) ODE solver, Brent root finding, Newton, optimization (Brent 1-d, BFGS, Nelder-Mead) |
 | `ax::sym`  | CAS core: immutable hash-consed expression DAG, canonicalizing simplifier, symbolic differentiation, univariate polynomial algebra over exact rationals, text/LaTeX printers |
 
@@ -70,10 +70,11 @@ inputs.
 
 ## Status
 
-Phases 0–5 of the [design spec](docs/specs/2026-07-05-axiom-design.md) are
-complete (172 tests passing). Phase 6 (hypothesis tests, OLS/GLM, MCMC, time
-series) is planned in [`docs/plans/`](docs/plans/). Implementation plans for
-every phase live there.
+Phases 0–6 of the [design spec](docs/specs/2026-07-05-axiom-design.md) are
+complete (230 tests passing). Next up: symbolic integration and solvers
+(Phase 7), the proof kernel (Phase 8), and the optional CUDA backend
+(Phase 9). Implementation plans for every phase live in
+[`docs/plans/`](docs/plans/).
 
 ## License
 

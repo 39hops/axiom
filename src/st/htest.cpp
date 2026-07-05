@@ -51,6 +51,8 @@ double chi2_p_value(double x2, double df) {
 
 test_result t_test(std::span<const double> xs, double mu0, alternative alt) {
   auto s = summarize(xs, "t_test");
+  if (s.var <= 0.0)
+    throw std::invalid_argument("t_test: zero sample variance");
   const double se = std::sqrt(s.var / static_cast<double>(s.n));
   const double df = static_cast<double>(s.n - 1);
   const double t = (s.mean - mu0) / se;
@@ -61,6 +63,8 @@ test_result t_test(std::span<const double> xs, std::span<const double> ys,
                    alternative alt, bool welch) {
   auto a = summarize(xs, "t_test");
   auto b = summarize(ys, "t_test");
+  if (a.var + b.var <= 0.0)
+    throw std::invalid_argument("t_test: zero variance in both samples");
   const double n1 = static_cast<double>(a.n), n2 = static_cast<double>(b.n);
   double t, df;
   if (welch) {
@@ -149,6 +153,8 @@ test_result anova_oneway(std::span<const std::vector<double>> groups) {
     ssb += static_cast<double>(g.size()) * (m - grand) * (m - grand);
     for (double x : g) ssw += (x - m) * (x - m);
   }
+  if (ssw <= 0.0)
+    throw std::invalid_argument("anova_oneway: zero within-group variance");
   const double df1 = static_cast<double>(groups.size() - 1);
   const double df2 = static_cast<double>(total_n - groups.size());
   const double f = (ssb / df1) / (ssw / df2);
