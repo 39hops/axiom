@@ -28,6 +28,7 @@ add_executable(ax_tests
   st/dist_cont_test.cpp
   st/dist_disc_test.cpp
   st/desc_test.cpp
+  st/htest_test.cpp
   num/root_test.cpp
   num/quad_test.cpp
   num/ode_test.cpp
