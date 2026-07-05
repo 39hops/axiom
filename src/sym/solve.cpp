@@ -2,6 +2,7 @@
 #include <ax/sym/solve.hpp>
 
 #include <cmath>
+#include <optional>
 #include <stdexcept>
 
 namespace ax::sym {
@@ -193,6 +194,212 @@ std::vector<std::complex<double>> durand_kerner(std::span<const double> coeffs,
     if (worst < tol) break;
   }
   return z;
+}
+
+namespace {
+
+bool depends_on(const expr& e, const expr& x) {
+  if (e.same(x)) return true;
+  for (const expr& a : e.args())
+    if (depends_on(a, x)) return true;
+  return false;
+}
+
+/** Decompose e as a*x + b with x-free a, b (a structurally nonzero). */
+bool split_linear(const expr& e, const expr& x, expr& a, expr& b) {
+  a = expr::num(0);
+  b = expr::num(0);
+  auto add_term = [&](const expr& t) -> bool {
+    if (!depends_on(t, x)) {
+      b = b + t;
+      return true;
+    }
+    if (t.same(x)) {
+      a = a + expr::num(1);
+      return true;
+    }
+    if (t.is_mul()) {
+      expr coef = expr::num(1);
+      int x_count = 0;
+      for (const expr& f : t.args()) {
+        if (f.same(x)) {
+          ++x_count;
+        } else if (depends_on(f, x)) {
+          return false;  // nonlinear in x
+        } else {
+          coef = coef * f;
+        }
+      }
+      if (x_count != 1) return false;
+      a = a + coef;
+      return true;
+    }
+    return false;
+  };
+  if (e.is_add()) {
+    for (const expr& t : e.args())
+      if (!add_term(t)) return false;
+  } else if (!add_term(e)) {
+    return false;
+  }
+  return !a.same(expr::num(0));
+}
+
+/** Principal-value inverse of f(name) applied to rhs; nullopt when the
+    inverse does not apply (domain violation on a numeric rhs, or unknown
+    function). */
+std::optional<expr> invert_fn(const std::string& name, const expr& rhs) {
+  double v = 0.0;
+  bool numeric = false;
+  if (rhs.is_num()) {
+    numeric = true;
+    v = rhs.eval();
+  }
+  if (name == "exp") {
+    if (numeric && v <= 0.0) return std::nullopt;
+    return expr::fn("log", rhs);
+  }
+  if (name == "log") return expr::fn("exp", rhs);
+  if (name == "sqrt") {
+    if (numeric && v < 0.0) return std::nullopt;
+    return rhs.pow(expr::num(2));
+  }
+  if (name == "sin") {
+    if (numeric && std::abs(v) > 1.0) return std::nullopt;
+    return expr::fn("asin", rhs);
+  }
+  if (name == "cos") {
+    if (numeric && std::abs(v) > 1.0) return std::nullopt;
+    return expr::fn("acos", rhs);
+  }
+  if (name == "tan") return expr::fn("atan", rhs);
+  return std::nullopt;
+}
+
+/** Numeric verification of a candidate root when everything evaluates;
+    candidates that cannot be evaluated (free symbols) are kept. */
+bool root_verifies(const expr& lhs, const expr& rhs, const expr& x,
+                   const expr& root) {
+  try {
+    const double l = lhs.subs(x, root).eval();
+    const double r = rhs.subs(x, root).eval();
+    if (!std::isfinite(l) || !std::isfinite(r)) return true;
+    return std::abs(l - r) <= 1e-8 * (1.0 + std::abs(r));
+  } catch (const std::logic_error&) {
+    return true;  // symbolic: structural construction is the guarantee
+  }
+}
+
+}  // namespace
+
+std::vector<expr> solve(const expr& lhs, const expr& rhs, const expr& x) {
+  if (!x.is_sym()) throw std::invalid_argument("solve: x must be a symbol");
+  const expr e = lhs - rhs;
+  std::vector<expr> out;
+
+  // polynomial route (rational coefficients)
+  try {
+    auto pr = solve_poly(e, x);
+    for (const expr& r : pr.exact)
+      if (root_verifies(lhs, rhs, x, r)) out.push_back(r);
+    return out;
+  } catch (const std::invalid_argument&) {
+  }
+
+  // linear with symbolic coefficients: a x + b == 0
+  {
+    expr a = expr::num(0), b = expr::num(0);
+    if (split_linear(e, x, a, b)) {
+      const expr r = -(b / a);
+      if (root_verifies(lhs, rhs, x, r)) out.push_back(r);
+      return out;
+    }
+  }
+
+  // single-function isolation: c_f * f(u) + k == 0  ->  f(u) == -k/c_f
+  {
+    expr fn_term = expr::num(0), k = expr::num(0);
+    bool found = false, bad = false;
+    auto scan_term = [&](const expr& t) {
+      if (!depends_on(t, x)) {
+        k = k + t;
+        return;
+      }
+      if (found) {
+        bad = true;  // two x-dependent terms
+        return;
+      }
+      found = true;
+      fn_term = t;
+    };
+    if (e.is_add())
+      for (const expr& t : e.args()) scan_term(t);
+    else
+      scan_term(e);
+    if (found && !bad) {
+      expr cf = expr::num(1), f = fn_term;
+      if (fn_term.is_mul()) {
+        expr rest = expr::num(1);
+        int dep_count = 0;
+        for (const expr& g : fn_term.args()) {
+          if (depends_on(g, x)) {
+            ++dep_count;
+            f = g;
+          } else {
+            rest = rest * g;
+          }
+        }
+        if (dep_count != 1) return out;
+        cf = rest;
+      }
+      if (f.is_fn() && depends_on(f.args()[0], x)) {
+        const expr target = -(k / cf);
+        if (auto inner_rhs = invert_fn(f.name(), target)) {
+          for (const expr& r : solve(f.args()[0], *inner_rhs, x))
+            if (root_verifies(lhs, rhs, x, r)) out.push_back(r);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+std::vector<expr> solve_linear_system(const std::vector<std::vector<expr>>& a,
+                                      const std::vector<expr>& b) {
+  const std::size_t n = a.size();
+  if (n == 0) throw std::invalid_argument("solve_linear_system: empty");
+  if (b.size() != n)
+    throw std::invalid_argument("solve_linear_system: shape mismatch");
+  for (const auto& row : a)
+    if (row.size() != n)
+      throw std::invalid_argument("solve_linear_system: shape mismatch");
+
+  const expr zero = expr::num(0);
+  std::vector<std::vector<expr>> m(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    m[i] = a[i];
+    m[i].push_back(b[i]);
+  }
+  for (std::size_t col = 0; col < n; ++col) {
+    std::size_t piv = col;
+    while (piv < n && m[piv][col].same(zero)) ++piv;
+    if (piv == n)
+      throw std::domain_error("solve_linear_system: singular (zero pivot)");
+    std::swap(m[col], m[piv]);
+    for (std::size_t r = col + 1; r < n; ++r) {
+      if (m[r][col].same(zero)) continue;
+      const expr f = m[r][col] / m[col][col];
+      for (std::size_t k = col; k <= n; ++k)
+        m[r][k] = m[r][k] - f * m[col][k];
+    }
+  }
+  std::vector<expr> sol(n, zero);
+  for (std::size_t i = n; i-- > 0;) {
+    expr s = m[i][n];
+    for (std::size_t k = i + 1; k < n; ++k) s = s - m[i][k] * sol[k];
+    sol[i] = s / m[i][i];
+  }
+  return sol;
 }
 
 poly_roots solve_poly(const expr& equation_lhs, const expr& x) {

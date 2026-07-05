@@ -33,4 +33,20 @@ std::vector<std::complex<double>> durand_kerner(std::span<const double> coeffs,
                                                 double tol = 1e-12,
                                                 int max_iter = 200);
 
+/** Solutions of lhs == rhs for x. Every returned expr is a verified exact
+    solution; an empty vector means "none found", not "none exist".
+    Handles: polynomial equations (exact roots via solve_poly), linear
+    equations with symbolic coefficients, and single unary-function isolation
+    f(u(x)) == c with principal-value inverses (exp/log/sqrt with
+    domain-checked constant c; sin/cos/tan give the principal solution only).
+    x must be a symbol (std::invalid_argument). */
+std::vector<expr> solve(const expr& lhs, const expr& rhs, const expr& x);
+
+/** Solve the n x n symbolic linear system A x = b by Gaussian elimination
+    over expr (structural-zero pivot detection). Throws std::invalid_argument
+    on shape mismatch or empty system, std::domain_error when no structurally
+    nonzero pivot exists (singular). */
+std::vector<expr> solve_linear_system(const std::vector<std::vector<expr>>& a,
+                                      const std::vector<expr>& b);
+
 }  // namespace ax::sym

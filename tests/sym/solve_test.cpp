@@ -146,6 +146,96 @@ TEST(solve_poly_t, non_polynomial_throws) {
   EXPECT_THROW((void)solve_poly(p, x), std::invalid_argument);
 }
 
+// ---------- Task 5: general solve ----------
+
+TEST(solve_t, polynomial_equation) {
+  const expr p = x.pow(expr::num(2)) - expr::num(4);
+  auto roots = solve(p, expr::num(0), x);
+  ASSERT_EQ(roots.size(), 2u);
+  std::vector<double> got{roots[0].eval(), roots[1].eval()};
+  std::sort(got.begin(), got.end());
+  EXPECT_NEAR(got[0], -2.0, 1e-12);
+  EXPECT_NEAR(got[1], 2.0, 1e-12);
+}
+
+TEST(solve_t, symbolic_linear) {
+  const expr a = expr::symbol("a"), b = expr::symbol("b");
+  auto roots = solve(a * x + b, expr::num(0), x);
+  ASSERT_EQ(roots.size(), 1u);
+  EXPECT_TRUE(roots[0].same(-(b / a)));
+}
+
+TEST(solve_t, exp_isolation) {
+  auto roots = solve(expr::fn("exp", x) - expr::num(5), expr::num(0), x);
+  ASSERT_EQ(roots.size(), 1u);
+  EXPECT_NEAR(roots[0].eval(), std::log(5.0), 1e-12);
+}
+
+TEST(solve_t, sin_of_linear_arg) {
+  auto roots = solve(expr::fn("sin", expr::num(2) * x), expr::num(1), x);
+  ASSERT_EQ(roots.size(), 1u);
+  EXPECT_NEAR(roots[0].eval(), std::asin(1.0) / 2.0, 1e-12);  // pi/4
+}
+
+TEST(solve_t, log_isolation) {
+  auto roots = solve(expr::fn("log", x + expr::num(1)), expr::num(0), x);
+  ASSERT_EQ(roots.size(), 1u);
+  EXPECT_NEAR(roots[0].eval(), 0.0, 1e-12);
+}
+
+TEST(solve_t, chained_exp_linear) {
+  // exp(2x+1) = 1 -> 2x+1 = log 1 -> x = -1/2
+  auto roots = solve(expr::fn("exp", expr::num(2) * x + expr::num(1)),
+                     expr::num(1), x);
+  ASSERT_EQ(roots.size(), 1u);
+  EXPECT_NEAR(roots[0].eval(), -0.5, 1e-12);
+}
+
+TEST(solve_t, exp_of_negative_constant_unsolvable) {
+  auto roots = solve(expr::fn("exp", x), expr::num(-3), x);
+  EXPECT_TRUE(roots.empty());
+}
+
+TEST(solve_t, not_isolatable_returns_empty) {
+  auto roots = solve(expr::fn("sin", x) * x, expr::num(0), x);
+  EXPECT_TRUE(roots.empty());
+}
+
+TEST(solve_linear_system_t, rational_2x2) {
+  // 2x + y = 5; x + 3y = 10 -> x = 1, y = 3
+  std::vector<std::vector<expr>> a{{expr::num(2), expr::num(1)},
+                                   {expr::num(1), expr::num(3)}};
+  std::vector<expr> b{expr::num(5), expr::num(10)};
+  auto sol = solve_linear_system(a, b);
+  ASSERT_EQ(sol.size(), 2u);
+  EXPECT_NEAR(sol[0].eval(), 1.0, 1e-12);
+  EXPECT_NEAR(sol[1].eval(), 3.0, 1e-12);
+}
+
+TEST(solve_linear_system_t, symbolic_diagonal) {
+  const expr a = expr::symbol("a"), b = expr::symbol("b");
+  const expr c = expr::symbol("c"), d = expr::symbol("d");
+  std::vector<std::vector<expr>> m{{a, expr::num(0)}, {expr::num(0), b}};
+  std::vector<expr> rhs{c, d};
+  auto sol = solve_linear_system(m, rhs);
+  ASSERT_EQ(sol.size(), 2u);
+  EXPECT_TRUE(sol[0].same(c / a));
+  EXPECT_TRUE(sol[1].same(d / b));
+}
+
+TEST(solve_linear_system_t, singular_throws) {
+  std::vector<std::vector<expr>> m{{expr::num(1), expr::num(1)},
+                                   {expr::num(1), expr::num(1)}};
+  std::vector<expr> rhs{expr::num(1), expr::num(2)};
+  EXPECT_THROW((void)solve_linear_system(m, rhs), std::domain_error);
+}
+
+TEST(solve_linear_system_t, shape_mismatch_throws) {
+  std::vector<std::vector<expr>> m{{expr::num(1)}};
+  std::vector<expr> rhs{expr::num(1), expr::num(2)};
+  EXPECT_THROW((void)solve_linear_system(m, rhs), std::invalid_argument);
+}
+
 TEST(durand_kerner_t, converges_on_cubic) {
   // (x-1)(x-2)(x-3): coeffs lowest-first {-6, 11, -6, 1}
   double coeffs[] = {-6.0, 11.0, -6.0, 1.0};
