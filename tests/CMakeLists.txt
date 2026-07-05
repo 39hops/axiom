@@ -20,6 +20,7 @@ add_executable(ax_tests
   core/fft_test.cpp
   la/mat_test.cpp
   la/matmul_test.cpp
+  la/lu_test.cpp
 )
 target_link_libraries(ax_tests PRIVATE axiom GTest::gtest_main)
 
