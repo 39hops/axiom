@@ -1,4 +1,4 @@
-#include <ax/core/bigint.hpp>
+﻿#include <ax/core/bigint.hpp>
 
 #include <ax/core/fft.hpp>
 
@@ -193,7 +193,11 @@ std::vector<std::uint64_t> mul_karatsuba(const std::vector<std::uint64_t>& a,
   return r;
 }
 
-constexpr std::size_t ntt_threshold = 4096;  // limbs; tuned in bench
+// Measured (Release, MSVC 14.50, single thread, 2026-07):
+//   100k digits: karatsuba 21ms, ntt 35ms   -> karatsuba wins
+//   500k digits: karatsuba 249ms, ntt 157ms -> ntt wins
+// Crossover sits between ~5200 and ~26000 limbs; 12288 splits it.
+constexpr std::size_t ntt_threshold = 12288;  // limbs
 
 /// NTT-based product: 16-bit digits, two-prime CRT reconstruction.
 /// Bound: max coefficient = (2^16-1)^2 * len <= 2^32 * 2^23 = 2^55

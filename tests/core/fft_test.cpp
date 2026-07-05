@@ -34,17 +34,31 @@ TEST(ntt, exact_convolution) {
   EXPECT_EQ(c, want);
 }
 
+namespace {
+
+/// Random n-limb positive bigint assembled via shifts (fast; avoids the
+/// O(n^2) decimal parse that dominates at this size).
+ax::bigint random_wide(std::size_t limbs, std::mt19937_64& rng) {
+  ax::bigint r;
+  for (std::size_t i = 0; i < limbs; ++i) {
+    // 63-bit chunks keep the long long constructor happy
+    r = (r << 63) + ax::bigint{static_cast<long long>(rng() >> 1)};
+  }
+  return r;
+}
+
+}  // namespace
+
 TEST(ntt, huge_bigint_mul_still_correct) {
-  // forces NTT path in bigint mul (>= ntt threshold limbs)
+  // forces NTT path in bigint mul: ~13000 limbs, above the 12288-limb NTT
+  // threshold. Independent oracle: split b in half by shifting so both
+  // partial products stay on the Karatsuba path (min operand ~6500 limbs),
+  // then compare against the NTT product.
   std::mt19937_64 rng{7};
-  std::string sa{"1"}, sb{"2"};
-  // 100k digits ~ 5200 limbs, safely above the 4096-limb NTT threshold
-  for (int i = 0; i < 100000; ++i)
-    sa.push_back(static_cast<char>('0' + rng() % 10));
-  for (int i = 0; i < 100000; ++i)
-    sb.push_back(static_cast<char>('0' + rng() % 10));
-  ax::bigint a{sa}, b{sb};
-  const ax::bigint p = a * b;
-  EXPECT_EQ(p / b, a);
-  EXPECT_TRUE((p % b).is_zero());
+  const ax::bigint a = random_wide(13000, rng);
+  const ax::bigint b = random_wide(13000, rng);
+  constexpr unsigned split_bits = 6500 * 64;
+  const ax::bigint b_hi = b >> split_bits;
+  const ax::bigint b_lo = b - (b_hi << split_bits);
+  EXPECT_EQ(a * b, ((a * b_hi) << split_bits) + a * b_lo);
 }

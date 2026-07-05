@@ -21,3 +21,8 @@ if(AXIOM_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
 endif()
+
+option(AXIOM_BUILD_BENCH "Build benchmarks" ON)
+if(AXIOM_BUILD_BENCH)
+  add_subdirectory(bench)
+endif()
