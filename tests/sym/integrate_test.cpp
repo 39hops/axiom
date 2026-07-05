@@ -92,3 +92,88 @@ TEST(integrate_core, honest_failure_gaussian) {
   const expr f = expr::fn("sin", x.pow(expr::num(2)));
   EXPECT_FALSE(integrate(f, x).has_value());
 }
+
+// ---------- Task 4: u-substitution ----------
+
+TEST(integrate_usub, gaussian_kernel_with_matching_factor) {
+  // 2x e^(x^2) -> e^(x^2)
+  const expr f = expr::num(2) * x * expr::fn("exp", x.pow(expr::num(2)));
+  check_roundtrip(f, -1.5, 1.5);
+}
+
+TEST(integrate_usub, cos_times_sin_squared) {
+  // cos x sin^2 x -> sin^3 x / 3
+  const expr f =
+      expr::fn("cos", x) * expr::fn("sin", x).pow(expr::num(2));
+  check_roundtrip(f, -1.5, 1.5);
+}
+
+TEST(integrate_usub, dlog_pattern) {
+  // (2x+1)/(x^2+x+3) -> log(x^2+x+3)
+  const expr g = x.pow(expr::num(2)) + x + expr::num(3);
+  const expr f = (expr::num(2) * x + expr::num(1)) * g.pow(expr::num(-1));
+  check_roundtrip(f, -2.0, 2.0);
+}
+
+// ---------- Task 4: integration by parts ----------
+
+TEST(integrate_parts, x_times_exp) {
+  const expr f = x * expr::fn("exp", x);
+  check_roundtrip(f, -2.0, 2.0);
+}
+
+TEST(integrate_parts, x_times_sin) {
+  const expr f = x * expr::fn("sin", x);
+  check_roundtrip(f, -3.0, 3.0);
+}
+
+TEST(integrate_parts, atan_alone) {
+  const expr f = expr::fn("atan", x);
+  check_roundtrip(f, -2.0, 2.0);
+}
+
+TEST(integrate_parts, x_squared_times_exp) {
+  const expr f = x.pow(expr::num(2)) * expr::fn("exp", x);
+  check_roundtrip(f, -1.5, 1.5);
+}
+
+// ---------- Task 4: partial fractions ----------
+
+TEST(integrate_pf, one_over_x2_minus_1) {
+  const expr f = (x.pow(expr::num(2)) - expr::num(1)).pow(expr::num(-1));
+  check_roundtrip(f, 2.0, 5.0);  // outside the poles
+}
+
+TEST(integrate_pf, one_over_1_plus_x2_is_atan) {
+  const expr f = (expr::num(1) + x.pow(expr::num(2))).pow(expr::num(-1));
+  auto af = integrate(f, x);
+  ASSERT_TRUE(af.has_value());
+  check_roundtrip(f, -3.0, 3.0);
+}
+
+TEST(integrate_pf, improper_rational) {
+  // (x^3+1)/(x-1) = x^2 + x + 1 + 2/(x-1)
+  const expr f =
+      (x.pow(expr::num(3)) + expr::num(1)) * (x - expr::num(1)).pow(
+          expr::num(-1));
+  check_roundtrip(f, 2.0, 6.0);
+}
+
+TEST(integrate_pf, irreducible_quadratic_completed_square) {
+  // 1/(x^2+2x+5) -> atan((x+1)/2)/2
+  const expr f = (x.pow(expr::num(2)) + expr::num(2) * x + expr::num(5))
+                     .pow(expr::num(-1));
+  check_roundtrip(f, -3.0, 3.0);
+}
+
+TEST(integrate_pf, repeated_linear_factor) {
+  // 1/(x-2)^2 -> -1/(x-2)   (also reachable via the linear-base power rule)
+  const expr f = (x - expr::num(2)).pow(expr::num(-2));
+  check_roundtrip(f, 3.0, 6.0);
+}
+
+TEST(integrate_heuristics, honest_failures) {
+  EXPECT_FALSE(integrate(expr::fn("exp", x.pow(expr::num(2))), x));
+  EXPECT_FALSE(
+      integrate(expr::fn("sin", x) * x.pow(expr::num(-1)), x));
+}
