@@ -128,6 +128,77 @@ std::vector<std::uint64_t> sub_mag(const std::vector<std::uint64_t>& a,
   return r;
 }
 
+constexpr std::size_t karatsuba_threshold = 32;  // limbs; tuned in bench
+
+std::vector<std::uint64_t> mul_mag(const std::vector<std::uint64_t>& a,
+                                   const std::vector<std::uint64_t>& b);
+
+/// low k limbs of v, trimmed
+std::vector<std::uint64_t> lo_part(const std::vector<std::uint64_t>& v,
+                                   std::size_t k) {
+  std::vector<std::uint64_t> r(v.begin(),
+                               v.begin() + static_cast<std::ptrdiff_t>(
+                                               std::min(k, v.size())));
+  while (!r.empty() && r.back() == 0) r.pop_back();
+  return r;
+}
+
+/// limbs of v above index k
+std::vector<std::uint64_t> hi_part(const std::vector<std::uint64_t>& v,
+                                   std::size_t k) {
+  if (v.size() <= k) return {};
+  return {v.begin() + static_cast<std::ptrdiff_t>(k), v.end()};
+}
+
+/// r += x shifted left by k limbs
+void add_shifted(std::vector<std::uint64_t>& r,
+                 const std::vector<std::uint64_t>& x, std::size_t k) {
+  if (x.empty()) return;
+  if (r.size() < x.size() + k) r.resize(x.size() + k, 0);
+  std::uint64_t carry = 0;
+  for (std::size_t i = 0; i < x.size(); ++i) {
+    std::uint64_t s = r[i + k] + carry;
+    const std::uint64_t c1 = s < carry ? 1u : 0u;
+    s += x[i];
+    carry = c1 + (s < x[i] ? 1u : 0u);
+    r[i + k] = s;
+  }
+  std::size_t j = k + x.size();
+  while (carry) {
+    if (j == r.size()) r.push_back(0);
+    r[j] += carry;
+    carry = r[j] < carry ? 1u : 0u;
+    ++j;
+  }
+}
+
+std::vector<std::uint64_t> mul_karatsuba(const std::vector<std::uint64_t>& a,
+                                         const std::vector<std::uint64_t>& b) {
+  const std::size_t k = (std::max(a.size(), b.size()) + 1) / 2;
+  const auto a0 = lo_part(a, k), a1 = hi_part(a, k);
+  const auto b0 = lo_part(b, k), b1 = hi_part(b, k);
+  const auto z0 = mul_mag(a0, b0);
+  const auto z2 = mul_mag(a1, b1);
+  const auto sa = add_mag(a0, a1);
+  const auto sb = add_mag(b0, b1);
+  auto z1 = mul_mag(sa, sb);  // (a0+a1)(b0+b1)
+  z1 = sub_mag(z1, add_mag(z0, z2));
+  std::vector<std::uint64_t> r;
+  add_shifted(r, z0, 0);
+  add_shifted(r, z1, k);
+  add_shifted(r, z2, 2 * k);
+  while (!r.empty() && r.back() == 0) r.pop_back();
+  return r;
+}
+
+std::vector<std::uint64_t> mul_mag(const std::vector<std::uint64_t>& a,
+                                   const std::vector<std::uint64_t>& b) {
+  if (a.empty() || b.empty()) return {};
+  if (std::min(a.size(), b.size()) < karatsuba_threshold)
+    return mul_school(a, b);
+  return mul_karatsuba(a, b);
+}
+
 /// split u64 limbs into u32 halves (little-endian)
 std::vector<std::uint32_t> to_h(const std::vector<std::uint64_t>& v) {
   std::vector<std::uint32_t> h;
@@ -319,7 +390,7 @@ bigint operator-(const bigint& a, const bigint& b) { return a + (-b); }
 
 bigint operator*(const bigint& a, const bigint& b) {
   bigint r;
-  r.limbs_ = mul_school(a.limbs_, b.limbs_);
+  r.limbs_ = mul_mag(a.limbs_, b.limbs_);
   r.neg_ = !r.limbs_.empty() && (a.neg_ != b.neg_);
   return r;
 }
