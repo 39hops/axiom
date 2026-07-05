@@ -1,4 +1,5 @@
 ﻿#include <ax/core/bigint.hpp>
+#include <ax/la/blas.hpp>
 #include <ax/par/pool.hpp>
 
 #include <random>
@@ -36,5 +37,21 @@ int main() {
 
   ax::thread_pool pool;
   ax::bench::run("pool_submit_overhead", [&] { pool.submit([] {}).get(); });
+
+  std::uniform_real_distribution<double> u(-1.0, 1.0);
+  auto random_mat = [&](std::size_t n) {
+    ax::la::mat m(n, n);
+    for (std::size_t i = 0; i < n; ++i)
+      for (std::size_t j = 0; j < n; ++j) m(i, j) = u(rng);
+    return m;
+  };
+  for (const std::size_t n : {std::size_t{256}, std::size_t{512}, std::size_t{1024}}) {
+    const ax::la::mat a = random_mat(n), b = random_mat(n);
+    const std::string tag = std::to_string(n);
+    ax::bench::run("matmul_serial_" + tag,
+                   [&] { auto c = ax::la::matmul(a, b); (void)c; });
+    ax::bench::run("matmul_parallel_" + tag,
+                   [&] { auto c = ax::la::matmul(a, b, pool); (void)c; });
+  }
   return 0;
 }
