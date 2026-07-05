@@ -35,4 +35,18 @@ mat cholesky(const mat& a);
     on size mismatch. */
 vec cholesky_solve(const mat& l, const vec& b);
 
+/** Householder QR: A (m x n, m >= n) = Q R with Q m x m orthogonal,
+    R m x n upper trapezoidal. */
+struct qr_result {
+  mat q;  ///< orthogonal, m x m
+  mat r;  ///< upper trapezoidal, m x n
+};
+
+/** Factor a. Throws std::invalid_argument if rows < cols. */
+qr_result qr_decompose(const mat& a);
+/** Least squares min ||a x - b|| via QR (full column rank assumed).
+    Throws std::invalid_argument if rows < cols or size mismatch,
+    std::domain_error on rank deficiency (zero diagonal in R). */
+vec lstsq(const mat& a, const vec& b);
+
 }  // namespace ax::la

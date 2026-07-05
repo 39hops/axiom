@@ -1,5 +1,6 @@
 #include <ax/la/decomp.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -123,6 +124,109 @@ vec cholesky_solve(const mat& l, const vec& b) {
     double s = y[i];
     for (std::size_t j = i + 1; j < n; ++j) s -= l(j, i) * x[j];
     x[i] = s / l(i, i);
+  }
+  return x;
+}
+
+namespace {
+
+/** Householder reflectors for a. On return `r` is upper trapezoidal and
+    `vs[k]` holds the k-th reflector (v, length m, zeros above row k) with
+    its beta. H_k = I - beta v v^T; A = H_0 ... H_{n-1} R. */
+struct reflectors {
+  mat r;
+  std::vector<vec> vs;
+  std::vector<double> betas;
+};
+
+reflectors householder(const mat& a) {
+  const std::size_t m = a.rows(), n = a.cols();
+  reflectors h{a, {}, {}};
+  h.vs.reserve(n);
+  h.betas.reserve(n);
+  for (std::size_t k = 0; k < n; ++k) {
+    // norm of column k below (and including) the diagonal
+    double norm2 = 0.0;
+    for (std::size_t i = k; i < m; ++i) norm2 += h.r(i, k) * h.r(i, k);
+    const double alpha = (h.r(k, k) >= 0.0 ? -1.0 : 1.0) * std::sqrt(norm2);
+    vec v(m);
+    for (std::size_t i = k + 1; i < m; ++i) v[i] = h.r(i, k);
+    v[k] = h.r(k, k) - alpha;
+    double vtv = 0.0;
+    for (std::size_t i = k; i < m; ++i) vtv += v[i] * v[i];
+    const double beta = (vtv == 0.0) ? 0.0 : 2.0 / vtv;
+    // apply H_k to remaining columns of R
+    for (std::size_t j = k; j < n; ++j) {
+      double s = 0.0;
+      for (std::size_t i = k; i < m; ++i) s += v[i] * h.r(i, j);
+      s *= beta;
+      for (std::size_t i = k; i < m; ++i) h.r(i, j) -= s * v[i];
+    }
+    // clean below-diagonal column k against rounding residue
+    h.r(k, k) = alpha == 0.0 ? h.r(k, k) : alpha;
+    for (std::size_t i = k + 1; i < m; ++i) h.r(i, k) = 0.0;
+    h.vs.push_back(std::move(v));
+    h.betas.push_back(beta);
+  }
+  return h;
+}
+
+/** Apply H_{n-1} ... H_0 to y in place (i.e. y <- Q^T y). */
+void apply_qt(const reflectors& h, vec& y) {
+  const std::size_t m = y.size();
+  for (std::size_t k = 0; k < h.vs.size(); ++k) {
+    const vec& v = h.vs[k];
+    double s = 0.0;
+    for (std::size_t i = k; i < m; ++i) s += v[i] * y[i];
+    s *= h.betas[k];
+    for (std::size_t i = k; i < m; ++i) y[i] -= s * v[i];
+  }
+}
+
+}  // namespace
+
+qr_result qr_decompose(const mat& a) {
+  const std::size_t m = a.rows(), n = a.cols();
+  if (m < n) throw std::invalid_argument("qr_decompose: rows < cols");
+  const reflectors h = householder(a);
+  // Q = H_0 ... H_{n-1}: apply H_k to each column of identity via Q^T rows.
+  mat q(m, m);
+  vec e(m);
+  for (std::size_t j = 0; j < m; ++j) {
+    for (std::size_t i = 0; i < m; ++i) e[i] = (i == j) ? 1.0 : 0.0;
+    // column j of Q is Q e_j; (Q e_j)_i = (Q^T)^T — build via reverse apply
+    for (std::size_t k = h.vs.size(); k-- > 0;) {
+      const vec& v = h.vs[k];
+      double s = 0.0;
+      for (std::size_t i = k; i < m; ++i) s += v[i] * e[i];
+      s *= h.betas[k];
+      for (std::size_t i = k; i < m; ++i) e[i] -= s * v[i];
+    }
+    for (std::size_t i = 0; i < m; ++i) q(i, j) = e[i];
+  }
+  return {std::move(q), h.r};
+}
+
+vec lstsq(const mat& a, const vec& b) {
+  const std::size_t m = a.rows(), n = a.cols();
+  if (m < n) throw std::invalid_argument("lstsq: rows < cols");
+  if (b.size() != m) throw std::invalid_argument("lstsq: size mismatch");
+  const reflectors h = householder(a);
+  // rank check: diagonal of R against scale of A
+  double scale = 0.0;
+  for (std::size_t i = 0; i < n; ++i)
+    scale = std::max(scale, std::abs(h.r(i, i)));
+  for (std::size_t i = 0; i < n; ++i)
+    if (std::abs(h.r(i, i)) <= 1e-12 * scale)
+      throw std::domain_error("lstsq: rank deficient");
+  vec y = b;
+  apply_qt(h, y);
+  // back substitution on top n x n block of R
+  vec x(n);
+  for (std::size_t i = n; i-- > 0;) {
+    double s = y[i];
+    for (std::size_t j = i + 1; j < n; ++j) s -= h.r(i, j) * x[j];
+    x[i] = s / h.r(i, i);
   }
   return x;
 }
