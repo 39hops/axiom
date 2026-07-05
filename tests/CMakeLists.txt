@@ -30,6 +30,7 @@ add_executable(ax_tests
   st/desc_test.cpp
   num/root_test.cpp
   num/quad_test.cpp
+  num/ode_test.cpp
 )
 target_link_libraries(ax_tests PRIVATE axiom GTest::gtest_main)
 
