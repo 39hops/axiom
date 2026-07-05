@@ -43,6 +43,7 @@ math/
 │   ├── core/          bigint, rational, fixed-precision float utils, constants
 │   ├── la/            dense matrix/vector, decompositions, backend dispatch
 │   ├── st/            distributions, tests, regression, mcmc, ts
+│   ├── num/           numeric methods: quadrature, ODE solvers, optimization
 │   ├── sym/           CAS: expr DAG, simplify, calculus, solve, print
 │   ├── prf/           proof kernel: terms, typechecker, tactics
 │   └── par/           thread pool, parallel_for, blocking helpers
@@ -61,6 +62,10 @@ math/
   Knuth algorithm D. Comparison, gcd (binary), pow, modpow.
 - `rational`: normalized `bigint` pair. Exact CAS substrate.
 - `real`: `double` wrappers + kahan summation, ulp helpers, constants.
+- Number theory: primality (Miller-Rabin deterministic < 2^64, probabilistic on
+  bigint), Pollard rho factorization, modular arithmetic (modpow, modinv, CRT).
+- `fft`: iterative radix-2 complex FFT + NTT (used by bigint mul above
+  Karatsuba range, convolutions, st spectral analysis).
 - Everything `constexpr`-friendly where practical.
 
 ### ax::par — parallelism substrate
@@ -89,7 +94,16 @@ math/
 - Tests: t (1/2-sample, Welch), chi², ANOVA, KS, Shapiro-Wilk (later).
 - Regression: OLS via QR; GLMs (logistic, Poisson) via IRLS on ax::la.
 - MCMC: Metropolis-Hastings v1; NUTS later.
-- Time series: ACF/PACF, AR/MA/ARIMA fit (CSS then MLE via Kalman later).
+- Time series: ACF/PACF, AR/MA/ARIMA fit (CSS then MLE via Kalman later),
+  periodogram/spectral density via ax::core fft.
+
+### ax::num — numeric methods
+- Quadrature: adaptive Gauss-Kronrod, tanh-sinh for endpoint singularities.
+- ODE: RK45 (Dormand-Prince) adaptive; stiff (implicit BDF) v1.5.
+- Root finding: bisection/Brent, Newton with numeric or symbolic (ax::sym)
+  derivative.
+- Optimization: golden-section/Brent 1-d, Newton, BFGS, Nelder-Mead;
+  linear programming (simplex) if st/GLM work surfaces need grows.
 
 ### ax::sym — CAS
 - Immutable expression DAG: `num, sym, add, mul, pow, fn` nodes,
@@ -99,6 +113,10 @@ math/
   (u-sub, parts, partial fractions) — "Risch-lite", not full Risch.
 - Solvers: polynomial exact to quartic (rational-coef), numeric fallback
   (Durand-Kerner); symbolic linear systems; basic trig/exp equations.
+- Polynomial algebra (first-class, also internal substrate for solve/simplify):
+  univariate/multivariate poly over rationals, arithmetic, GCD (Euclidean +
+  modular), square-free + rational-root factorization, resultants. Gröbner
+  bases deferred to v1.5.
 - Printers: plain text + LaTeX.
 - Hook: solver/simplifier steps can emit trace records for future
   proof-obligation generation.
@@ -136,18 +154,23 @@ math/
 ## Phases
 
 0. Repo skeleton, CMake, CI-less local build, ax::par pool, test harness.
-1. core: bigint + rational (heavy TDD; Karatsuba benched).
+1. core: bigint + rational (heavy TDD; Karatsuba benched), number theory,
+   FFT/NTT (wire into bigint mul).
 2. la: mat/vec, blocked parallel matmul, LU/QR/Cholesky; bench baseline.
 3. st part 1: RNG, special functions, distributions, descriptive.
-4. sym part 1: expr DAG, hash-consing, simplifier, differentiation, printers.
-5. st part 2: tests, OLS/GLM, MCMC; SVD/eigen in la as needed.
-6. sym part 2: integration heuristics, solvers.
-7. prf: kernel, tactics, CAS bridge for polynomial identities.
-8. cuda: matmul backend, dispatch, bench vs CPU.
-9. (future, separate spec) model fine-tune + verifier loop.
+4. num: quadrature, RK45, root finding, optimization core (needed by st
+   quantiles/GLM/MLE).
+5. sym part 1: expr DAG, hash-consing, simplifier, differentiation,
+   polynomial algebra, printers.
+6. st part 2: tests, OLS/GLM, MCMC, time series; SVD/eigen in la as needed.
+7. sym part 2: integration heuristics, solvers.
+8. prf: kernel, tactics, CAS bridge for polynomial identities.
+9. cuda: matmul backend, dispatch, bench vs CPU.
+10. (future, separate spec) model fine-tune + verifier loop.
 
 ## Out of scope
 
 - Multi-node distribution, sparse matrices (v2 candidate), full Risch,
-  arbitrary-precision floats (bigfloat is v2 candidate), Windows-only build
-  assumed (no cross-platform CI yet), the LLM itself.
+  arbitrary-precision floats (bigfloat is v2 candidate), Gröbner bases (v1.5),
+  stiff ODE solvers (v1.5), Windows-only build assumed (no cross-platform CI
+  yet), the LLM itself.
