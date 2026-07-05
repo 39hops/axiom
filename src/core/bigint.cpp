@@ -461,4 +461,43 @@ std::strong_ordering operator<=>(const bigint& a, const bigint& b) {
                  : std::strong_ordering::equal;
 }
 
+bigint abs(const bigint& a) { return a.is_negative() ? -a : a; }
+
+bigint gcd(bigint a, bigint b) {
+  a = abs(a);
+  b = abs(b);
+  while (!b.is_zero()) {
+    bigint r = a % b;
+    a = std::move(b);
+    b = std::move(r);
+  }
+  return a;
+}
+
+bigint pow(const bigint& a, unsigned long long e) {
+  bigint base = a, result{1};
+  while (e) {
+    if (e & 1) result = result * base;
+    base = base * base;
+    e >>= 1;
+  }
+  return result;
+}
+
+bigint modpow(bigint base, bigint exp, const bigint& m) {
+  if (m.is_zero() || m.is_negative())
+    throw std::domain_error("modpow: modulus must be positive");
+  bigint result{1};
+  base = base % m;
+  if (base.is_negative()) base = base + m;
+  const bigint two{2};
+  while (!exp.is_zero()) {
+    auto [q, r] = bigint::divmod(exp, two);
+    if (!r.is_zero()) result = (result * base) % m;
+    base = (base * base) % m;
+    exp = std::move(q);
+  }
+  return result;
+}
+
 }  // namespace ax

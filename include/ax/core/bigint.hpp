@@ -56,4 +56,13 @@ class bigint {
   void trim();                       ///< Drop leading zero limbs, fix -0.
 };
 
+/** Absolute value. */
+bigint abs(const bigint& a);
+/** Greatest common divisor of |a| and |b|; gcd(0,0) == 0. */
+bigint gcd(bigint a, bigint b);
+/** a raised to non-negative exponent e (square-and-multiply). */
+bigint pow(const bigint& a, unsigned long long e);
+/** (base^exp) mod m, exp >= 0, m > 0. Throws std::domain_error on m <= 0. */
+bigint modpow(bigint base, bigint exp, const bigint& m);
+
 }  // namespace ax
