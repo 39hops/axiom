@@ -12,6 +12,7 @@ add_library(axiom STATIC
   src/la/blas.cpp
   src/la/decomp.cpp
   src/st/rng.cpp
+  src/st/sf.cpp
 )
 target_include_directories(axiom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(axiom PUBLIC cxx_std_23)
