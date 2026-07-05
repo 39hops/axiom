@@ -30,8 +30,13 @@ class bigint {
   /// Decimal representation.
   std::string to_string() const;
 
+  /// Negation; -0 stays 0.
+  bigint operator-() const;
+
   friend bool operator==(const bigint&, const bigint&) = default;
   friend std::strong_ordering operator<=>(const bigint& a, const bigint& b);
+  friend bigint operator+(const bigint& a, const bigint& b);
+  friend bigint operator-(const bigint& a, const bigint& b);
 
  private:
   bool neg_ = false;                 ///< Sign; false for zero.

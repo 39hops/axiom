@@ -64,6 +64,43 @@ std::uint64_t divmod_small(std::vector<std::uint64_t>& v, std::uint64_t d) {
   return rem;
 }
 
+/// r = a + b (magnitudes)
+std::vector<std::uint64_t> add_mag(const std::vector<std::uint64_t>& a,
+                                   const std::vector<std::uint64_t>& b) {
+  const auto& big = a.size() >= b.size() ? a : b;
+  const auto& small = a.size() >= b.size() ? b : a;
+  std::vector<std::uint64_t> r(big.size());
+  std::uint64_t carry = 0;
+  for (std::size_t i = 0; i < big.size(); ++i) {
+    std::uint64_t s = big[i] + carry;
+    std::uint64_t c1 = (s < carry) ? 1u : 0u;
+    if (i < small.size()) {
+      s += small[i];
+      c1 += (s < small[i]) ? 1u : 0u;
+    }
+    r[i] = s;
+    carry = c1;
+  }
+  if (carry) r.push_back(carry);
+  return r;
+}
+
+/// r = a - b (magnitudes), requires a >= b
+std::vector<std::uint64_t> sub_mag(const std::vector<std::uint64_t>& a,
+                                   const std::vector<std::uint64_t>& b) {
+  std::vector<std::uint64_t> r(a.size());
+  std::uint64_t borrow = 0;
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    const std::uint64_t bi = i < b.size() ? b[i] : 0;
+    const std::uint64_t d = a[i] - bi;
+    const std::uint64_t d2 = d - borrow;
+    borrow = ((a[i] < bi) || (d < borrow)) ? 1u : 0u;
+    r[i] = d2;
+  }
+  while (!r.empty() && r.back() == 0) r.pop_back();
+  return r;
+}
+
 }  // namespace
 
 void bigint::trim() {
@@ -109,6 +146,31 @@ std::string bigint::to_string() const {
   std::reverse(digits.begin(), digits.end());
   return digits;
 }
+
+bigint bigint::operator-() const {
+  bigint r = *this;
+  if (!r.is_zero()) r.neg_ = !r.neg_;
+  return r;
+}
+
+bigint operator+(const bigint& a, const bigint& b) {
+  bigint r;
+  if (a.neg_ == b.neg_) {
+    r.limbs_ = add_mag(a.limbs_, b.limbs_);
+    r.neg_ = a.neg_;
+  } else {
+    const int c = cmp_mag(a.limbs_, b.limbs_);
+    if (c == 0) return r;  // magnitudes equal, opposite signs: zero
+    const bigint& big = c > 0 ? a : b;
+    const bigint& small = c > 0 ? b : a;
+    r.limbs_ = sub_mag(big.limbs_, small.limbs_);
+    r.neg_ = big.neg_;
+  }
+  r.trim();
+  return r;
+}
+
+bigint operator-(const bigint& a, const bigint& b) { return a + (-b); }
 
 std::strong_ordering operator<=>(const bigint& a, const bigint& b) {
   if (a.neg_ != b.neg_)
