@@ -15,6 +15,7 @@ add_executable(ax_tests
   core/bigint_div_test.cpp
   core/bigint_karatsuba_test.cpp
   core/bigint_gcd_pow_test.cpp
+  core/rational_test.cpp
 )
 target_link_libraries(ax_tests PRIVATE axiom GTest::gtest_main)
 
