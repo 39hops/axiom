@@ -34,6 +34,7 @@ add_executable(ax_tests
   num/opt_test.cpp
   sym/expr_test.cpp
   sym/calc_test.cpp
+  sym/poly_test.cpp
 )
 target_link_libraries(ax_tests PRIVATE axiom GTest::gtest_main)
 
