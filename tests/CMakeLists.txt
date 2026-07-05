@@ -25,6 +25,7 @@ add_executable(ax_tests
   la/qr_test.cpp
   st/rng_test.cpp
   st/sf_test.cpp
+  st/dist_cont_test.cpp
 )
 target_link_libraries(ax_tests PRIVATE axiom GTest::gtest_main)
 
