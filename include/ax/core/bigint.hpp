@@ -42,6 +42,13 @@ class bigint {
   friend bigint operator<<(const bigint& a, unsigned bits);
   /// Magnitude shift right by bits (truncates toward zero on negatives).
   friend bigint operator>>(const bigint& a, unsigned bits);
+  friend bigint operator/(const bigint& a, const bigint& b);
+  friend bigint operator%(const bigint& a, const bigint& b);
+
+  /** Quotient and remainder in one pass. Truncated division:
+      q = trunc(a/b), r = a - q*b (r takes sign of a).
+      Throws std::domain_error when b == 0. */
+  static std::pair<bigint, bigint> divmod(const bigint& a, const bigint& b);
 
  private:
   bool neg_ = false;                 ///< Sign; false for zero.

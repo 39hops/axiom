@@ -128,6 +128,124 @@ std::vector<std::uint64_t> sub_mag(const std::vector<std::uint64_t>& a,
   return r;
 }
 
+/// split u64 limbs into u32 halves (little-endian)
+std::vector<std::uint32_t> to_h(const std::vector<std::uint64_t>& v) {
+  std::vector<std::uint32_t> h;
+  h.reserve(v.size() * 2);
+  for (auto x : v) {
+    h.push_back(static_cast<std::uint32_t>(x));
+    h.push_back(static_cast<std::uint32_t>(x >> 32));
+  }
+  while (!h.empty() && h.back() == 0) h.pop_back();
+  return h;
+}
+
+std::vector<std::uint64_t> from_h(const std::vector<std::uint32_t>& h) {
+  std::vector<std::uint64_t> v((h.size() + 1) / 2, 0);
+  for (std::size_t i = 0; i < h.size(); ++i)
+    v[i / 2] |= static_cast<std::uint64_t>(h[i]) << (32 * (i % 2));
+  while (!v.empty() && v.back() == 0) v.pop_back();
+  return v;
+}
+
+/// Knuth TAOCP vol.2 4.3.1 Algorithm D, base 2^32, magnitudes only.
+/// Requires v nonempty (nonzero divisor).
+void divmod_mag(std::vector<std::uint32_t> u, std::vector<std::uint32_t> v,
+                std::vector<std::uint32_t>& q, std::vector<std::uint32_t>& r) {
+  constexpr std::uint64_t base = 1ull << 32;
+  if (v.size() == 1) {
+    q.assign(u.size(), 0);
+    std::uint64_t rem = 0;
+    for (std::size_t i = u.size(); i-- > 0;) {
+      const std::uint64_t cur = (rem << 32) | u[i];
+      q[i] = static_cast<std::uint32_t>(cur / v[0]);
+      rem = cur % v[0];
+    }
+    while (!q.empty() && q.back() == 0) q.pop_back();
+    r.clear();
+    if (rem) r.push_back(static_cast<std::uint32_t>(rem));
+    return;
+  }
+  const std::size_t n = v.size();
+  if (u.size() < n) {
+    q.clear();
+    r = std::move(u);
+    return;
+  }
+  const std::size_t m = u.size() - n;
+
+  // D1 normalize: shift so v.back() >= base/2
+  int s = 0;
+  for (std::uint32_t top = v.back(); top < (1u << 31); top <<= 1) ++s;
+  auto shl = [&](std::vector<std::uint32_t>& a) {
+    if (!s) return;
+    std::uint32_t carry = 0;
+    for (auto& x : a) {
+      const std::uint32_t nc = x >> (32 - s);
+      x = (x << s) | carry;
+      carry = nc;
+    }
+    if (carry) a.push_back(carry);
+  };
+  shl(v);
+  u.push_back(0);
+  shl(u);
+  if (u.size() < m + n + 1) u.resize(m + n + 1, 0);
+
+  q.assign(m + 1, 0);
+  for (std::size_t j = m + 1; j-- > 0;) {
+    // D3 trial digit
+    const std::uint64_t num =
+        (static_cast<std::uint64_t>(u[j + n]) << 32) | u[j + n - 1];
+    std::uint64_t qh = num / v[n - 1];
+    std::uint64_t rh = num % v[n - 1];
+    while (qh >= base ||
+           qh * v[n - 2] > ((rh << 32) | u[j + n - 2])) {
+      --qh;
+      rh += v[n - 1];
+      if (rh >= base) break;
+    }
+    // D4 multiply-subtract
+    std::int64_t borrow = 0;
+    std::uint64_t carry = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+      const std::uint64_t p = qh * v[i] + carry;
+      carry = p >> 32;
+      const std::int64_t t = static_cast<std::int64_t>(u[i + j]) -
+                             static_cast<std::int64_t>(p & 0xffffffffu) -
+                             borrow;
+      u[i + j] = static_cast<std::uint32_t>(t);
+      borrow = t < 0 ? 1 : 0;
+    }
+    const std::int64_t t = static_cast<std::int64_t>(u[j + n]) -
+                           static_cast<std::int64_t>(carry) - borrow;
+    u[j + n] = static_cast<std::uint32_t>(t);
+    // D5/D6 add back on overshoot
+    if (t < 0) {
+      --qh;
+      std::uint64_t c = 0;
+      for (std::size_t i = 0; i < n; ++i) {
+        const std::uint64_t sum =
+            static_cast<std::uint64_t>(u[i + j]) + v[i] + c;
+        u[i + j] = static_cast<std::uint32_t>(sum);
+        c = sum >> 32;
+      }
+      u[j + n] = static_cast<std::uint32_t>(u[j + n] + c);
+    }
+    q[j] = static_cast<std::uint32_t>(qh);
+  }
+  while (!q.empty() && q.back() == 0) q.pop_back();
+  // D8 denormalize remainder
+  r.assign(u.begin(), u.begin() + n);
+  if (s) {
+    for (std::size_t i = 0; i < r.size(); ++i) {
+      r[i] >>= s;
+      if (i + 1 < n) r[i] |= u[i + 1] << (32 - s);
+    }
+  }
+  while (!r.empty() && r.back() == 0) r.pop_back();
+}
+
 }  // namespace
 
 void bigint::trim() {
@@ -240,6 +358,26 @@ bigint operator>>(const bigint& a, unsigned bits) {
   }
   r.trim();
   return r;
+}
+
+std::pair<bigint, bigint> bigint::divmod(const bigint& a, const bigint& b) {
+  if (b.is_zero()) throw std::domain_error("bigint: division by zero");
+  std::vector<std::uint32_t> qh, rh;
+  divmod_mag(to_h(a.limbs_), to_h(b.limbs_), qh, rh);
+  bigint q, r;
+  q.limbs_ = from_h(qh);
+  r.limbs_ = from_h(rh);
+  q.neg_ = !q.limbs_.empty() && (a.neg_ != b.neg_);
+  r.neg_ = !r.limbs_.empty() && a.neg_;
+  return {q, r};
+}
+
+bigint operator/(const bigint& a, const bigint& b) {
+  return bigint::divmod(a, b).first;
+}
+
+bigint operator%(const bigint& a, const bigint& b) {
+  return bigint::divmod(a, b).second;
 }
 
 std::strong_ordering operator<=>(const bigint& a, const bigint& b) {
