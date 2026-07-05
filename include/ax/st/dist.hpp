@@ -139,4 +139,40 @@ struct laplace_dist {
   double var() const;
 };
 
+struct binomial_dist {
+  int n;
+  double p;
+  binomial_dist(int n, double p);  ///< n >= 0, p in (0,1)
+  double pmf(int k) const;
+  double cdf(int k) const;
+  int quantile(double p) const;  ///< smallest k with cdf(k) >= p
+  int sample(rng& g) const;
+  double mean() const;
+  double var() const;
+};
+
+struct poisson_dist {
+  double lambda;
+  explicit poisson_dist(double lambda);  ///< lambda > 0
+  double pmf(int k) const;
+  double cdf(int k) const;
+  int quantile(double p) const;
+  int sample(rng& g) const;
+  double mean() const;
+  double var() const;
+};
+
+/** Number of failures before the r-th success, success probability p. */
+struct negbinom_dist {
+  int r;
+  double p;
+  negbinom_dist(int r, double p);  ///< r >= 1, p in (0,1)
+  double pmf(int k) const;
+  double cdf(int k) const;
+  int quantile(double p) const;
+  int sample(rng& g) const;
+  double mean() const;
+  double var() const;
+};
+
 }  // namespace ax::st

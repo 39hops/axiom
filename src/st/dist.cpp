@@ -378,4 +378,123 @@ double laplace_dist::sample(rng& g) const {
 double laplace_dist::mean() const { return mu; }
 double laplace_dist::var() const { return 2.0 * b * b; }
 
+// ---------------------------------------------------------------- binomial
+
+namespace {
+
+/** Smallest k in [0, hi] with cdf(k) >= p (linear scan; n small in v1). */
+template <typename F>
+int disc_quantile(F cdf, double p, int hi) {
+  check_p(p);
+  for (int k = 0;; ++k) {
+    if (cdf(k) >= p) return k;
+    if (hi >= 0 && k >= hi) return hi;
+  }
+}
+
+double log_choose(double n, double k) {
+  return sf::lgamma(n + 1.0) - sf::lgamma(k + 1.0) - sf::lgamma(n - k + 1.0);
+}
+
+}  // namespace
+
+binomial_dist::binomial_dist(int n_, double p_) : n(n_), p(p_) {
+  if (n < 0) throw std::invalid_argument("binomial_dist: n must be >= 0");
+  if (!(p > 0.0 && p < 1.0))
+    throw std::invalid_argument("binomial_dist: p must be in (0,1)");
+}
+double binomial_dist::pmf(int k) const {
+  if (k < 0 || k > n) return 0.0;
+  const double kk = k, nn = n;
+  return std::exp(log_choose(nn, kk) + kk * std::log(p) +
+                  (nn - kk) * std::log1p(-p));
+}
+double binomial_dist::cdf(int k) const {
+  if (k < 0) return 0.0;
+  if (k >= n) return 1.0;
+  // P(X <= k) = I_{1-p}(n-k, k+1)
+  return sf::beta_inc(static_cast<double>(n - k), static_cast<double>(k + 1),
+                      1.0 - p);
+}
+int binomial_dist::quantile(double q) const {
+  return disc_quantile([this](int k) { return cdf(k); }, q, n);
+}
+int binomial_dist::sample(rng& g) const {
+  int c = 0;
+  for (int i = 0; i < n; ++i)
+    if (g.next_double() < p) ++c;
+  return c;
+}
+double binomial_dist::mean() const { return n * p; }
+double binomial_dist::var() const { return n * p * (1.0 - p); }
+
+// ---------------------------------------------------------------- poisson
+
+poisson_dist::poisson_dist(double lambda_) : lambda(lambda_) {
+  if (!(lambda > 0.0))
+    throw std::invalid_argument("poisson_dist: lambda must be > 0");
+}
+double poisson_dist::pmf(int k) const {
+  if (k < 0) return 0.0;
+  const double kk = k;
+  return std::exp(kk * std::log(lambda) - lambda - sf::lgamma(kk + 1.0));
+}
+double poisson_dist::cdf(int k) const {
+  if (k < 0) return 0.0;
+  // P(X <= k) = Q(k+1, lambda)
+  return sf::gamma_q(static_cast<double>(k + 1), lambda);
+}
+int poisson_dist::quantile(double q) const {
+  return disc_quantile([this](int k) { return cdf(k); }, q, -1);
+}
+int poisson_dist::sample(rng& g) const {
+  // Knuth per <= 25 units of lambda; Poisson sums are Poisson.
+  double remaining = lambda;
+  int total = 0;
+  while (remaining > 0.0) {
+    const double chunk = remaining > 25.0 ? 25.0 : remaining;
+    remaining -= chunk;
+    const double limit = std::exp(-chunk);
+    double prod = g.next_double();
+    while (prod > limit) {
+      ++total;
+      prod *= g.next_double();
+    }
+  }
+  return total;
+}
+double poisson_dist::mean() const { return lambda; }
+double poisson_dist::var() const { return lambda; }
+
+// ---------------------------------------------------------------- negbinom
+
+negbinom_dist::negbinom_dist(int r_, double p_) : r(r_), p(p_) {
+  if (r < 1) throw std::invalid_argument("negbinom_dist: r must be >= 1");
+  if (!(p > 0.0 && p < 1.0))
+    throw std::invalid_argument("negbinom_dist: p must be in (0,1)");
+}
+double negbinom_dist::pmf(int k) const {
+  if (k < 0) return 0.0;
+  const double kk = k, rr = r;
+  return std::exp(log_choose(kk + rr - 1.0, kk) + rr * std::log(p) +
+                  kk * std::log1p(-p));
+}
+double negbinom_dist::cdf(int k) const {
+  if (k < 0) return 0.0;
+  // P(X <= k) = I_p(r, k+1)
+  return sf::beta_inc(static_cast<double>(r), static_cast<double>(k + 1), p);
+}
+int negbinom_dist::quantile(double q) const {
+  return disc_quantile([this](int k) { return cdf(k); }, q, -1);
+}
+int negbinom_dist::sample(rng& g) const {
+  // gamma-Poisson mixture: lambda ~ Gamma(r, (1-p)/p), X ~ Poisson(lambda)
+  const double lam = g.gamma(static_cast<double>(r), (1.0 - p) / p);
+  if (lam == 0.0) return 0;
+  const poisson_dist mix{lam};
+  return mix.sample(g);
+}
+double negbinom_dist::mean() const { return r * (1.0 - p) / p; }
+double negbinom_dist::var() const { return r * (1.0 - p) / (p * p); }
+
 }  // namespace ax::st
