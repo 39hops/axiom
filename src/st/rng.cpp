@@ -1,5 +1,6 @@
 #include <ax/st/rng.hpp>
 
+#include <cmath>
 #include <stdexcept>
 
 namespace ax::st {
@@ -75,6 +76,89 @@ std::uint64_t rng::below(std::uint64_t n) {
   for (;;) {
     const std::uint64_t v = next_u64();
     if (v >= threshold) return v % n;
+  }
+}
+
+namespace {
+
+/** Ziggurat tables for the standard normal (128 layers).
+    x_[0] = v/f(r) (virtual base-strip edge), x_[1] = r, x_[128] = 0. */
+struct zig_tables {
+  static constexpr double kR = 3.442619855899;
+  static constexpr double kV = 9.91256303526217e-3;
+  double x[129];
+  zig_tables() {
+    x[1] = kR;
+    x[0] = kV * std::exp(0.5 * kR * kR);
+    for (int i = 2; i <= 127; ++i) {
+      const double prev = x[i - 1];
+      x[i] = std::sqrt(
+          -2.0 * std::log(kV / prev + std::exp(-0.5 * prev * prev)));
+    }
+    x[128] = 0.0;
+  }
+};
+
+const zig_tables& zig() {
+  static const zig_tables t;
+  return t;
+}
+
+}  // namespace
+
+double rng::normal() {
+  const zig_tables& t = zig();
+  for (;;) {
+    const std::uint64_t bits = next_u64();
+    const int i = static_cast<int>(bits & 127u);
+    const double u = 2.0 * next_double() - 1.0;  // (-1,1)
+    const double x = u * t.x[i];
+    if (std::abs(x) < t.x[i + 1]) return x;  // inside rectangle
+    if (i == 0) {
+      // Marsaglia tail beyond r
+      double xt, yt;
+      do {
+        xt = -std::log(1.0 - next_double()) / zig_tables::kR;
+        yt = -std::log(1.0 - next_double());
+      } while (2.0 * yt < xt * xt);
+      return u > 0.0 ? zig_tables::kR + xt : -(zig_tables::kR + xt);
+    }
+    // wedge: accept under the density
+    const double f0 = std::exp(-0.5 * t.x[i] * t.x[i]);
+    const double f1 = std::exp(-0.5 * t.x[i + 1] * t.x[i + 1]);
+    if (f1 + next_double() * (f0 - f1) < std::exp(-0.5 * x * x)) return x;
+  }
+}
+
+double rng::normal(double mu, double sigma) { return mu + sigma * normal(); }
+
+double rng::exponential(double lambda) {
+  if (!(lambda > 0.0))
+    throw std::invalid_argument("rng::exponential: lambda must be > 0");
+  return -std::log(1.0 - next_double()) / lambda;
+}
+
+double rng::gamma(double shape, double scale) {
+  if (!(shape > 0.0) || !(scale > 0.0))
+    throw std::invalid_argument("rng::gamma: shape and scale must be > 0");
+  if (shape < 1.0) {
+    // boost: G(a) = G(a+1) * U^{1/a}
+    const double u = 1.0 - next_double();  // (0,1]
+    return gamma(shape + 1.0, scale) * std::pow(u, 1.0 / shape);
+  }
+  const double d = shape - 1.0 / 3.0;
+  const double c = 1.0 / std::sqrt(9.0 * d);
+  for (;;) {
+    double x, v;
+    do {
+      x = normal();
+      v = 1.0 + c * x;
+    } while (v <= 0.0);
+    v = v * v * v;
+    const double u = 1.0 - next_double();  // (0,1], safe for log
+    if (u < 1.0 - 0.0331 * x * x * x * x) return d * v * scale;
+    if (std::log(u) < 0.5 * x * x + d * (1.0 - v + std::log(v)))
+      return d * v * scale;
   }
 }
 

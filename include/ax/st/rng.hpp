@@ -22,6 +22,16 @@ class rng {
   /** Uniform integer in [0,n), unbiased via rejection. n must be > 0. */
   std::uint64_t below(std::uint64_t n);
 
+  /** Standard normal N(0,1) via 128-layer ziggurat. */
+  double normal();
+  /** Normal N(mu, sigma^2). */
+  double normal(double mu, double sigma);
+  /** Exponential with rate lambda > 0. Throws std::invalid_argument. */
+  double exponential(double lambda = 1.0);
+  /** Gamma(shape, scale), shape > 0, scale > 0 (Marsaglia-Tsang).
+      Throws std::invalid_argument. */
+  double gamma(double shape, double scale = 1.0);
+
   // std UniformRandomBitGenerator surface
   std::uint64_t operator()() { return next_u64(); }
   static constexpr std::uint64_t min() { return 0; }
