@@ -70,11 +70,10 @@ inputs.
 
 ## Status
 
-Phases 0–6 of the [design spec](docs/specs/2026-07-05-axiom-design.md) are
-complete (230 tests passing). Next up: symbolic integration and solvers
-(Phase 7), the proof kernel (Phase 8), and the optional CUDA backend
-(Phase 9). Implementation plans for every phase live in
-[`docs/plans/`](docs/plans/).
+Phases 0–7 of the [design spec](docs/specs/2026-07-05-axiom-design.md) are
+complete (296 tests passing). Next up: the proof kernel (Phase 8) and the
+optional CUDA backend (Phase 9). Implementation plans for every phase live
+in [`docs/plans/`](docs/plans/).
 
 ## License
 
