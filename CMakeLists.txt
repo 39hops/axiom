@@ -19,6 +19,7 @@ add_library(axiom STATIC
   src/num/quad.cpp
   src/num/ode.cpp
   src/num/opt.cpp
+  src/sym/expr.cpp
 )
 target_include_directories(axiom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(axiom PUBLIC cxx_std_23)
