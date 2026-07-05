@@ -30,6 +30,7 @@ add_executable(ax_tests
   st/desc_test.cpp
   st/htest_test.cpp
   st/reg_test.cpp
+  st/glm_test.cpp
   num/root_test.cpp
   num/quad_test.cpp
   num/ode_test.cpp
