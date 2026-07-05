@@ -1,5 +1,7 @@
 #include <ax/core/bigint.hpp>
 
+#include <ax/core/fft.hpp>
+
 #include <algorithm>
 #include <stdexcept>
 
@@ -191,12 +193,70 @@ std::vector<std::uint64_t> mul_karatsuba(const std::vector<std::uint64_t>& a,
   return r;
 }
 
+constexpr std::size_t ntt_threshold = 4096;  // limbs; tuned in bench
+
+/// NTT-based product: 16-bit digits, two-prime CRT reconstruction.
+/// Bound: max coefficient = (2^16-1)^2 * len <= 2^32 * 2^23 = 2^55
+///        < ntt_mod * ntt_mod2 ~ 2^57.3, so two primes reconstruct exactly.
+std::vector<std::uint64_t> mul_ntt(const std::vector<std::uint64_t>& a,
+                                   const std::vector<std::uint64_t>& b) {
+  auto to_digits = [](const std::vector<std::uint64_t>& v) {
+    std::vector<std::uint64_t> d;
+    d.reserve(v.size() * 4);
+    for (auto x : v)
+      for (int k = 0; k < 4; ++k) d.push_back((x >> (16 * k)) & 0xffffu);
+    while (!d.empty() && d.back() == 0) d.pop_back();
+    return d;
+  };
+  const auto da = to_digits(a), db = to_digits(b);
+  const auto c1 = ntt_convolve(da, db, ntt_mod);
+  const auto c2 = ntt_convolve(da, db, ntt_mod2);
+  // per-coefficient CRT: x = r1 + p1 * ((r2 - r1) * inv(p1 mod p2) mod p2)
+  // inv(998244353 mod 167772161) precomputed = modinv value
+  constexpr std::uint64_t p1 = ntt_mod, p2 = ntt_mod2;
+  // compute inv(p1) mod p2 once via Fermat
+  auto pm2 = [](std::uint64_t x, std::uint64_t e, std::uint64_t m) {
+    std::uint64_t r = 1;
+    x %= m;
+    while (e) {
+      if (e & 1) r = r * x % m;
+      x = x * x % m;
+      e >>= 1;
+    }
+    return r;
+  };
+  const std::uint64_t inv_p1 = pm2(p1 % p2, p2 - 2, p2);
+  std::vector<std::uint64_t> digits(c1.size() + 8, 0);
+  std::uint64_t carry = 0;
+  for (std::size_t i = 0; i < c1.size(); ++i) {
+    const std::uint64_t r1 = c1[i], r2 = c2[i];
+    const std::uint64_t t = (r2 + p2 - r1 % p2) % p2 * inv_p1 % p2;
+    const std::uint64_t val = r1 + p1 * t;  // exact coefficient, < 2^58
+    const std::uint64_t total = val + carry;
+    digits[i] = total & 0xffffu;
+    carry = total >> 16;
+  }
+  std::size_t i = c1.size();
+  while (carry) {
+    digits[i] = carry & 0xffffu;
+    carry >>= 16;
+    ++i;
+  }
+  // pack 16-bit digits back into u64 limbs
+  std::vector<std::uint64_t> r((digits.size() + 3) / 4, 0);
+  for (std::size_t k = 0; k < digits.size(); ++k)
+    r[k / 4] |= digits[k] << (16 * (k % 4));
+  while (!r.empty() && r.back() == 0) r.pop_back();
+  return r;
+}
+
 std::vector<std::uint64_t> mul_mag(const std::vector<std::uint64_t>& a,
                                    const std::vector<std::uint64_t>& b) {
   if (a.empty() || b.empty()) return {};
-  if (std::min(a.size(), b.size()) < karatsuba_threshold)
-    return mul_school(a, b);
-  return mul_karatsuba(a, b);
+  const std::size_t small = std::min(a.size(), b.size());
+  if (small < karatsuba_threshold) return mul_school(a, b);
+  if (small < ntt_threshold) return mul_karatsuba(a, b);
+  return mul_ntt(a, b);
 }
 
 /// split u64 limbs into u32 halves (little-endian)

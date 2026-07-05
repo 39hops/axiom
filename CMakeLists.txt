@@ -8,6 +8,7 @@ add_library(axiom STATIC
   src/core/bigint.cpp
   src/core/rational.cpp
   src/core/nt.cpp
+  src/core/fft.cpp
 )
 target_include_directories(axiom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(axiom PUBLIC cxx_std_23)
