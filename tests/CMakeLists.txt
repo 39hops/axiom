@@ -11,6 +11,7 @@ add_executable(ax_tests
   par/pool_test.cpp
   core/bigint_basic_test.cpp
   core/bigint_addsub_test.cpp
+  core/bigint_mul_test.cpp
 )
 target_link_libraries(ax_tests PRIVATE axiom GTest::gtest_main)
 

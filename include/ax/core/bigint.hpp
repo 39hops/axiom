@@ -37,6 +37,11 @@ class bigint {
   friend std::strong_ordering operator<=>(const bigint& a, const bigint& b);
   friend bigint operator+(const bigint& a, const bigint& b);
   friend bigint operator-(const bigint& a, const bigint& b);
+  friend bigint operator*(const bigint& a, const bigint& b);
+  /// Magnitude shift left by bits; sign preserved.
+  friend bigint operator<<(const bigint& a, unsigned bits);
+  /// Magnitude shift right by bits (truncates toward zero on negatives).
+  friend bigint operator>>(const bigint& a, unsigned bits);
 
  private:
   bool neg_ = false;                 ///< Sign; false for zero.

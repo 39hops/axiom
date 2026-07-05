@@ -64,6 +64,33 @@ std::uint64_t divmod_small(std::vector<std::uint64_t>& v, std::uint64_t d) {
   return rem;
 }
 
+/// schoolbook magnitude product
+std::vector<std::uint64_t> mul_school(const std::vector<std::uint64_t>& a,
+                                      const std::vector<std::uint64_t>& b) {
+  if (a.empty() || b.empty()) return {};
+  std::vector<std::uint64_t> r(a.size() + b.size(), 0);
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    std::uint64_t carry = 0;
+    for (std::size_t j = 0; j < b.size(); ++j) {
+      const u128 p = mul64(a[i], b[j]);
+      std::uint64_t lo = p.lo + carry;
+      std::uint64_t hi = p.hi + (lo < carry ? 1 : 0);
+      lo += r[i + j];
+      hi += (lo < r[i + j]) ? 1 : 0;
+      r[i + j] = lo;
+      carry = hi;
+    }
+    std::size_t k = i + b.size();
+    while (carry) {
+      r[k] += carry;
+      carry = (r[k] < carry) ? 1 : 0;
+      ++k;
+    }
+  }
+  while (!r.empty() && r.back() == 0) r.pop_back();
+  return r;
+}
+
 /// r = a + b (magnitudes)
 std::vector<std::uint64_t> add_mag(const std::vector<std::uint64_t>& a,
                                    const std::vector<std::uint64_t>& b) {
@@ -171,6 +198,49 @@ bigint operator+(const bigint& a, const bigint& b) {
 }
 
 bigint operator-(const bigint& a, const bigint& b) { return a + (-b); }
+
+bigint operator*(const bigint& a, const bigint& b) {
+  bigint r;
+  r.limbs_ = mul_school(a.limbs_, b.limbs_);
+  r.neg_ = !r.limbs_.empty() && (a.neg_ != b.neg_);
+  return r;
+}
+
+bigint operator<<(const bigint& a, unsigned bits) {
+  if (a.is_zero() || bits == 0) return a;
+  const unsigned limb_shift = bits / 64, bit_shift = bits % 64;
+  bigint r;
+  r.neg_ = a.neg_;
+  r.limbs_.assign(limb_shift, 0);
+  std::uint64_t carry = 0;
+  for (std::uint64_t limb : a.limbs_) {
+    if (bit_shift == 0) {
+      r.limbs_.push_back(limb);
+    } else {
+      r.limbs_.push_back((limb << bit_shift) | carry);
+      carry = limb >> (64 - bit_shift);
+    }
+  }
+  if (carry) r.limbs_.push_back(carry);
+  return r;
+}
+
+bigint operator>>(const bigint& a, unsigned bits) {
+  const unsigned limb_shift = bits / 64, bit_shift = bits % 64;
+  bigint r;
+  if (limb_shift >= a.limbs_.size()) return r;
+  r.neg_ = a.neg_;
+  r.limbs_.assign(a.limbs_.begin() + limb_shift, a.limbs_.end());
+  if (bit_shift) {
+    for (std::size_t i = 0; i < r.limbs_.size(); ++i) {
+      r.limbs_[i] >>= bit_shift;
+      if (i + 1 < r.limbs_.size())
+        r.limbs_[i] |= r.limbs_[i + 1] << (64 - bit_shift);
+    }
+  }
+  r.trim();
+  return r;
+}
 
 std::strong_ordering operator<=>(const bigint& a, const bigint& b) {
   if (a.neg_ != b.neg_)
