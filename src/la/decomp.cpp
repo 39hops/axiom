@@ -88,4 +88,43 @@ mat inverse(const mat& a) {
   return inv;
 }
 
+mat cholesky(const mat& a) {
+  if (a.rows() != a.cols())
+    throw std::invalid_argument("cholesky: matrix not square");
+  const std::size_t n = a.rows();
+  mat l(n, n);
+  for (std::size_t j = 0; j < n; ++j) {
+    double d = a(j, j);
+    for (std::size_t k = 0; k < j; ++k) d -= l(j, k) * l(j, k);
+    if (d <= 0.0) throw std::domain_error("cholesky: matrix not SPD");
+    l(j, j) = std::sqrt(d);
+    for (std::size_t i = j + 1; i < n; ++i) {
+      double s = a(i, j);
+      for (std::size_t k = 0; k < j; ++k) s -= l(i, k) * l(j, k);
+      l(i, j) = s / l(j, j);
+    }
+  }
+  return l;
+}
+
+vec cholesky_solve(const mat& l, const vec& b) {
+  const std::size_t n = l.rows();
+  if (b.size() != n) throw std::invalid_argument("cholesky_solve: size mismatch");
+  // forward substitution L y = b
+  vec y(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    double s = b[i];
+    for (std::size_t j = 0; j < i; ++j) s -= l(i, j) * y[j];
+    y[i] = s / l(i, i);
+  }
+  // back substitution L^T x = y
+  vec x(n);
+  for (std::size_t i = n; i-- > 0;) {
+    double s = y[i];
+    for (std::size_t j = i + 1; j < n; ++j) s -= l(j, i) * x[j];
+    x[i] = s / l(i, i);
+  }
+  return x;
+}
+
 }  // namespace ax::la

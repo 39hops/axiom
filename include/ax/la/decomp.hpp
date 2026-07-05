@@ -26,4 +26,13 @@ double det(const mat& a);
     singular. */
 mat inverse(const mat& a);
 
+/** Cholesky A = L L^T for symmetric positive definite A.
+    Returns lower-triangular L. Throws std::domain_error if not SPD
+    (non-positive pivot), std::invalid_argument if not square.
+    Only lower triangle of input is read. */
+mat cholesky(const mat& a);
+/** Solve a x = b given L from cholesky(). Throws std::invalid_argument
+    on size mismatch. */
+vec cholesky_solve(const mat& l, const vec& b);
+
 }  // namespace ax::la

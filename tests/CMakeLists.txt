@@ -21,6 +21,7 @@ add_executable(ax_tests
   la/mat_test.cpp
   la/matmul_test.cpp
   la/lu_test.cpp
+  la/cholesky_test.cpp
 )
 target_link_libraries(ax_tests PRIVATE axiom GTest::gtest_main)
 
