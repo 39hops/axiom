@@ -365,6 +365,9 @@ double expr::eval(const std::map<std::string, double>& env) const {
       if (n.nm == "exp") return std::exp(x);
       if (n.nm == "log") return std::log(x);
       if (n.nm == "sqrt") return std::sqrt(x);
+      if (n.nm == "atan") return std::atan(x);
+      if (n.nm == "asin") return std::asin(x);
+      if (n.nm == "acos") return std::acos(x);
       throw std::logic_error("expr::eval: unknown function " + n.nm);
     }
   }

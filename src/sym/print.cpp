@@ -116,6 +116,9 @@ std::string latex(const expr& e) {
     case kind::fn: {
       const std::string arg = "\\left(" + latex(e.args()[0]) + "\\right)";
       if (e.name() == "sqrt") return "\\sqrt{" + latex(e.args()[0]) + "}";
+      if (e.name() == "atan") return "\\arctan" + arg;
+      if (e.name() == "asin") return "\\arcsin" + arg;
+      if (e.name() == "acos") return "\\arccos" + arg;
       return "\\" + e.name() + arg;
     }
     case kind::add: {

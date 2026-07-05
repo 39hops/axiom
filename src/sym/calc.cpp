@@ -19,6 +19,14 @@ expr fn_outer_derivative(const std::string& name, const expr& u) {
   if (name == "sqrt")
     return expr::num(rational(bigint(1), bigint(2))) *
            u.pow(expr::num(rational(bigint(-1), bigint(2))));
+  if (name == "atan")  // 1/(1+u^2)
+    return (expr::num(1) + u.pow(expr::num(2))).pow(expr::num(-1));
+  if (name == "asin")  // 1/sqrt(1-u^2)
+    return (expr::num(1) - u.pow(expr::num(2)))
+        .pow(expr::num(rational(bigint(-1), bigint(2))));
+  if (name == "acos")  // -1/sqrt(1-u^2)
+    return -((expr::num(1) - u.pow(expr::num(2)))
+                 .pow(expr::num(rational(bigint(-1), bigint(2)))));
   throw std::logic_error("diff: unknown function " + name);
 }
 
