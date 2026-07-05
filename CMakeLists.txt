@@ -28,6 +28,7 @@ add_library(axiom STATIC
   src/sym/poly.cpp
   src/sym/print.cpp
   src/sym/expand.cpp
+  src/sym/solve.cpp
 )
 target_include_directories(axiom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(axiom PUBLIC cxx_std_23)
