@@ -172,6 +172,13 @@ TEST(integrate_pf, repeated_linear_factor) {
   check_roundtrip(f, 3.0, 6.0);
 }
 
+TEST(integrate_heuristics, huge_exponent_fails_fast_no_hang) {
+  // x^1000000 * sin(x): heuristics must refuse the poly conversion instead
+  // of expanding a million-term power
+  const expr f = x.pow(expr::num(1000000)) * expr::fn("sin", x);
+  EXPECT_FALSE(integrate(f, x).has_value());
+}
+
 TEST(integrate_heuristics, honest_failures) {
   EXPECT_FALSE(integrate(expr::fn("exp", x.pow(expr::num(2))), x));
   EXPECT_FALSE(

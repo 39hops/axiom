@@ -15,7 +15,7 @@ the only dependency, and it is test-only (fetched by CMake).
 | `ax::la`   | Dense `mat`/`vec`, cache-blocked multithreaded matmul, LU, Cholesky, Householder QR, least squares |
 | `ax::st`   | PCG64 RNG (ziggurat normal), special functions (lgamma, erf, incomplete gamma/beta), 15 probability distributions with pdf/cdf/quantile/sample, descriptive statistics, hypothesis tests (t, chi-square, ANOVA, KS), OLS with inference, GLMs (logistic/Poisson via IRLS), Metropolis-Hastings MCMC, time series (ACF/PACF, AR/ARMA, periodogram) |
 | `ax::num`  | Adaptive Gauss-Kronrod and tanh-sinh quadrature, RK45 (Dormand-Prince) ODE solver, Brent root finding, Newton, optimization (Brent 1-d, BFGS, Nelder-Mead) |
-| `ax::sym`  | CAS core: immutable hash-consed expression DAG, canonicalizing simplifier, symbolic differentiation, univariate polynomial algebra over exact rationals, text/LaTeX printers |
+| `ax::sym`  | CAS: immutable hash-consed expression DAG, canonicalizing simplifier, symbolic differentiation, integration (table, u-substitution, parts, partial fractions), equation solving (exact polynomial roots through quartic, Durand-Kerner numeric fallback, symbolic linear systems), univariate polynomial algebra over exact rationals, expansion, text/LaTeX printers |
 
 See [`docs/specs/2026-07-05-axiom-design.md`](docs/specs/2026-07-05-axiom-design.md)
 for the full design and roadmap (hypothesis tests, GLM, MCMC, time series,
@@ -51,7 +51,7 @@ double x = n.sample(g);
 Requirements: a C++23 compiler, CMake ≥ 3.28, Ninja. Developed against MSVC
 (VS 2026 Build Tools) on Windows; the code itself is standard C++23.
 
-```
+```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ctest --test-dir build --output-on-failure

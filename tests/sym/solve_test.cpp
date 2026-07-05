@@ -141,6 +141,11 @@ TEST(solve_poly_t, repeated_root_multiplicity) {
   EXPECT_EQ(ones, 2);
 }
 
+TEST(solve_poly_t, huge_exponent_throws_fast) {
+  const expr p = x.pow(expr::num(1000000)) - expr::num(1);
+  EXPECT_THROW((void)solve_poly(p, x), std::invalid_argument);
+}
+
 TEST(solve_poly_t, non_polynomial_throws) {
   const expr p = expr::fn("sin", x) - expr::num(1);
   EXPECT_THROW((void)solve_poly(p, x), std::invalid_argument);

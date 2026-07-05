@@ -48,6 +48,31 @@ std::optional<rational> linear_coefficient(const expr& e, const expr& x) {
 
 expr inv(const rational& a) { return expr::num(rational(bigint(1)) / a); }
 
+constexpr long long kmax_poly_exponent = 512;  ///< from_expr degree guard
+
+bool exponents_bounded(const expr& e) {
+  if (e.is_pow() && e.args()[1].is_num()) {
+    const rational& n = e.args()[1].value();
+    if (n.den() == bigint(1) && abs(n.num()) > bigint(kmax_poly_exponent))
+      return false;
+  }
+  for (const expr& a : e.args())
+    if (!exponents_bounded(a)) return false;
+  return true;
+}
+
+/** poly::from_expr with cost and exception guards. */
+std::optional<poly> try_poly(const expr& e, const expr& x) {
+  if (!exponents_bounded(e)) return std::nullopt;
+  try {
+    return poly::from_expr(e, x);
+  } catch (const std::invalid_argument&) {
+    return std::nullopt;
+  } catch (const std::overflow_error&) {
+    return std::nullopt;
+  }
+}
+
 expr rat(long long n, long long d = 1) {
   return expr::num(rational(bigint(n), bigint(d)));
 }
@@ -146,15 +171,11 @@ std::optional<expr> constant_ratio(const expr& h, const expr& d,
   auto [ch, rh] = split_num(h);
   auto [cd, rd] = split_num(d);
   if (rh.same(rd)) return expr::num(ch / cd);
-  try {
-    const poly ph = poly::from_expr(h, x);
-    const poly pd = poly::from_expr(d, x);
-    if (pd.degree() >= 0) {
-      auto [q, rem] = ph.divmod(pd);
-      if (rem == poly{} && q.degree() == 0)
-        return expr::num(q.coeff(0));
-    }
-  } catch (const std::invalid_argument&) {
+  const auto ph = try_poly(h, x);
+  const auto pd = try_poly(d, x);
+  if (ph && pd && pd->degree() >= 0) {
+    auto [q, rem] = ph->divmod(*pd);
+    if (rem == poly{} && q.degree() == 0) return expr::num(q.coeff(0));
   }
   return std::nullopt;
 }
@@ -238,12 +259,11 @@ bool as_rational_function(const expr& e, const expr& x, poly& p, poly& q) {
     for (const expr& f : e.args()) classify(f);
   else
     classify(e);
-  try {
-    p = poly::from_expr(num_e, x);
-    q = poly::from_expr(den_e, x);
-  } catch (const std::invalid_argument&) {
-    return false;
-  }
+  const auto pn = try_poly(num_e, x);
+  const auto pq = try_poly(den_e, x);
+  if (!pn || !pq) return false;
+  p = *pn;
+  q = *pq;
   return q.degree() >= 1;
 }
 
@@ -380,11 +400,7 @@ int liate_priority(const expr& f, const expr& x) {
     if (n == "log" || n == "atan" || n == "asin" || n == "acos") return 0;
     return 2;  // trig / exp: prefer as dv
   }
-  try {
-    (void)poly::from_expr(f, x);
-    return 1;  // algebraic
-  } catch (const std::invalid_argument&) {
-  }
+  if (try_poly(f, x)) return 1;  // algebraic
   return 2;
 }
 

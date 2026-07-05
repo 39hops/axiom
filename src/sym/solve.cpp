@@ -1,6 +1,7 @@
 #include <ax/sym/poly.hpp>
 #include <ax/sym/solve.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <optional>
 #include <stdexcept>
@@ -10,6 +11,21 @@ namespace ax::sym {
 namespace {
 
 const rational kzero{};
+
+constexpr long long kmax_poly_exponent = 512;  ///< from_expr degree guard
+
+/** Every numeric integer exponent in e is within kmax_poly_exponent —
+    keeps poly::from_expr's O(n) power expansion bounded. */
+bool exponents_bounded(const expr& e) {
+  if (e.is_pow() && e.args()[1].is_num()) {
+    const rational& n = e.args()[1].value();
+    if (n.den() == bigint(1) && abs(n.num()) > bigint(kmax_poly_exponent))
+      return false;
+  }
+  for (const expr& a : e.args())
+    if (!exponents_bounded(a)) return false;
+  return true;
+}
 
 double to_double(const rational& q) { return expr::num(q).eval(); }
 
@@ -84,10 +100,16 @@ void solve_cubic(const rational& r2, const rational& r1, const rational& r0,
                      p * p * p * rational(bigint(1), bigint(27));
 
   auto push_complex_pair_numeric = [&] {
-    // remaining two roots of the cubic are the nonreal ones
+    // remaining two roots of the cubic are the nonreal ones: take the two
+    // with the largest |imag| so the count is right even if the filter
+    // threshold would mis-classify a near-real iterate
     const double c3[] = {to_double(r0), to_double(r1), to_double(r2), 1.0};
-    for (auto z : durand_kerner(c3))
-      if (std::abs(z.imag()) > 1e-8) approx.push_back(z);
+    auto zs = durand_kerner(c3);
+    std::sort(zs.begin(), zs.end(), [](const auto& a, const auto& b) {
+      return std::abs(a.imag()) > std::abs(b.imag());
+    });
+    approx.push_back(zs[0]);
+    approx.push_back(zs[1]);
   };
 
   if (d > kzero || (d == kzero && p == kzero)) {
@@ -276,17 +298,27 @@ std::optional<expr> invert_fn(const std::string& name, const expr& rhs) {
   return std::nullopt;
 }
 
-/** Numeric verification of a candidate root when everything evaluates;
-    candidates that cannot be evaluated (free symbols) are kept. */
+bool contains_symbol(const expr& e) {
+  if (e.is_sym()) return true;
+  for (const expr& a : e.args())
+    if (contains_symbol(a)) return true;
+  return false;
+}
+
+/** Numeric verification of a candidate root. Candidates with free symbols
+    are kept (structural construction is the guarantee); fully numeric
+    candidates must evaluate finite and satisfy the equation. */
 bool root_verifies(const expr& lhs, const expr& rhs, const expr& x,
                    const expr& root) {
+  const expr le = lhs.subs(x, root), re = rhs.subs(x, root);
+  if (contains_symbol(le) || contains_symbol(re)) return true;
   try {
-    const double l = lhs.subs(x, root).eval();
-    const double r = rhs.subs(x, root).eval();
-    if (!std::isfinite(l) || !std::isfinite(r)) return true;
+    const double l = le.eval();
+    const double r = re.eval();
+    if (!std::isfinite(l) || !std::isfinite(r)) return false;
     return std::abs(l - r) <= 1e-8 * (1.0 + std::abs(r));
   } catch (const std::logic_error&) {
-    return true;  // symbolic: structural construction is the guarantee
+    return false;  // numeric candidate that cannot evaluate: reject
   }
 }
 
@@ -403,6 +435,8 @@ std::vector<expr> solve_linear_system(const std::vector<std::vector<expr>>& a,
 }
 
 poly_roots solve_poly(const expr& equation_lhs, const expr& x) {
+  if (!exponents_bounded(equation_lhs))
+    throw std::invalid_argument("solve_poly: exponent too large");
   poly p = poly::from_expr(equation_lhs, x);  // throws invalid_argument
   if (p.degree() < 1)
     throw std::invalid_argument("solve_poly: constant polynomial");
