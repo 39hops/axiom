@@ -49,6 +49,13 @@ ratio ratio_pow(const expr& base, const expr& ex, const expr& x) {
       if (k == 0) return {expr::num(1), expr::num(1)};
     }
   }
+  // Fractional negative exponent (e.g. u^(-1/2) from 1/sqrt(u)): route the
+  // positive power into the denominator so sqrt shapes share a common
+  // denominator and cancel via pow merging.
+  if (ex.is_num() && !(ex.value().den() == bigint(1)) &&
+      ex.value() < rational{}) {
+    return {expr::num(1), canonical(base, x).pow(expr::num(-ex.value()))};
+  }
   // Opaque power: canonicalize both parts, keep as an atom.
   return {canonical(base, x).pow(canonical(ex, x)), expr::num(1)};
 }
@@ -58,8 +65,16 @@ ratio as_ratio(const expr& e, const expr& x) {
     case kind::num:
     case kind::sym:
       return {e, expr::num(1)};
-    case kind::fn:
-      return {expr::fn(e.name(), canonical(e.args()[0], x)), expr::num(1)};
+    case kind::fn: {
+      const expr arg = canonical(e.args()[0], x);
+      // sqrt(u) -> u^(1/2): lets expr's pow merging do the algebra
+      // (sqrt(u)*sqrt(u) -> u, sqrt(u)/u -> u^(-1/2), ...). Sound because
+      // sqrt defined implies u >= 0.
+      if (e.name() == "sqrt")
+        return {arg.pow(expr::num(rational(bigint(1), bigint(2)))),
+                expr::num(1)};
+      return {expr::fn(e.name(), arg), expr::num(1)};
+    }
     case kind::pow:
       return ratio_pow(e.args()[0], e.args()[1], x);
     case kind::mul: {

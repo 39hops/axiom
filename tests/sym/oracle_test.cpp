@@ -136,4 +136,47 @@ TEST(EquivModConst, LlmoptShapedPair) {
   EXPECT_EQ(equivalent_mod_const(big_f, integrand, x), verdict::equivalent);
 }
 
+// ------------------------------------------------- sqrt-as-algebraic-atom
+
+TEST(CanonicalSqrt, SqrtTimesSqrtIsArgument) {
+  const expr e = canonical(parse("sqrt(2 - x)*sqrt(2 - x)"), x);
+  EXPECT_TRUE(e.same(parse("2 - x"))) << to_string(e);
+}
+
+TEST(CanonicalSqrt, ReciprocalSqrtRecombines) {
+  // sqrt(x)/x == 1/sqrt(x) on the domain of sqrt.
+  const expr e = canonical(parse("1/sqrt(x) - sqrt(x)/x"), x);
+  EXPECT_TRUE(e.same(expr::num(0))) << to_string(e);
+}
+
+TEST(CanonicalSqrt, TaxRowShapeCombines) {
+  // Real parity-tax shape: split form vs combined over 2*sqrt(2-x).
+  // (checked numerically: x=1 gives 22.5 both sides)
+  const expr a =
+      parse("45*sqrt(2 - x) + 90/sqrt(2 - x) - (45*x + 180)/(2*sqrt(2 - x))");
+  const expr b = parse("(180 - 135*x)/(2*sqrt(2 - x))");
+  EXPECT_EQ(equivalent(a, b, x), verdict::equivalent);
+}
+
+TEST(CanonicalSqrt, SqrtX2DerivativeMatchesSympyForm) {
+  // axiom's d/dx 8*sqrt(x**2) is 8*x*(x**2)**(-1/2); sympy prints
+  // 8*sqrt(x**2)/x. Equal via (x**2)**(1/2)*(x**2)**(1/2) -> x**2.
+  EXPECT_EQ(equivalent(diff(parse("8*sqrt(x**2)"), x),
+                       parse("8*sqrt(x**2)/x"), x),
+            verdict::equivalent);
+}
+
+TEST(CanonicalSqrt, IntegerPowerOfSqrtFolds) {
+  const expr e = canonical(parse("sqrt(x + 1)**4"), x);
+  EXPECT_TRUE(e.same(canonical(parse("(x + 1)**2"), x))) << to_string(e);
+}
+
+TEST(CanonicalSqrt, StillHonestOnDifferentRadicands) {
+  // sqrt(4*x+2) vs sqrt(2)*sqrt(2*x+1): true, but needs radicand
+  // factorization we don't do -> undecided, never guessed.
+  EXPECT_EQ(equivalent(parse("sqrt(4*x + 2)"), parse("sqrt(2)*sqrt(2*x + 1)"),
+                       x),
+            verdict::undecided);
+}
+
 }  // namespace
