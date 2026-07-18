@@ -46,6 +46,7 @@ add_executable(ax_tests
   sym/integrate_test.cpp
   sym/parse_test.cpp
   sym/oracle_test.cpp
+  sym/jsonl_test.cpp
 )
 target_link_libraries(ax_tests PRIVATE axiom GTest::gtest_main)
 

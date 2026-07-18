@@ -32,12 +32,17 @@ add_library(axiom STATIC
   src/sym/integrate.cpp
   src/sym/parse.cpp
   src/sym/oracle.cpp
+  src/sym/jsonl.cpp
+  src/sym/harness.cpp
 )
 target_include_directories(axiom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(axiom PUBLIC cxx_std_23)
 if(MSVC)
   target_compile_options(axiom PUBLIC /W4 /permissive- /EHsc)
 endif()
+
+add_executable(axiom-oracle tools/oracle_main.cpp)
+target_link_libraries(axiom-oracle PRIVATE axiom)
 
 option(AXIOM_BUILD_TESTS "Build tests" ON)
 if(AXIOM_BUILD_TESTS)
