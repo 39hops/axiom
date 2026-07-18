@@ -47,7 +47,10 @@ add_executable(ax_tests
   sym/parse_test.cpp
   sym/oracle_test.cpp
   sym/jsonl_test.cpp
+  pyrand/pyrand_test.cpp
 )
+target_compile_definitions(ax_tests PRIVATE
+  AX_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(ax_tests PRIVATE axiom GTest::gtest_main)
 
 include(GoogleTest)

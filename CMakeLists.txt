@@ -34,6 +34,8 @@ add_library(axiom STATIC
   src/sym/oracle.cpp
   src/sym/jsonl.cpp
   src/sym/harness.cpp
+  src/pyrand/sha512.cpp
+  src/pyrand/pyrand.cpp
 )
 target_include_directories(axiom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(axiom PUBLIC cxx_std_23)
