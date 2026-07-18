@@ -93,6 +93,20 @@ measured not promised).
 JSON handling is a minimal in-repo STL-only reader/writer for this flat
 schema (strings/objects one level deep) — not a general JSON library.
 
+## Running the parity audit (measured 2026-07-18)
+
+1. llmopt dumps ~10⁵ farm rows (sstr text) into `farm.jsonl` per the task
+   schema above.
+2. `axiom-oracle farm.jsonl axiom_verdicts.jsonl` (Release build; measured
+   ~11 ms/row on monster-shaped `equiv_mod_const` rows → ≈ 18 min for 10⁵
+   rows single-threaded).
+3. The llmopt side produces sympy verdicts for the same rows and diffs:
+   - axiom EQUIVALENT where sympy says unequal → **soundness bug**, blocks
+     oracle-of-record status.
+   - axiom NOT_EQUIVALENT where sympy says equal → witness bug, blocks.
+   - UNDECIDED / error rows → fallback-tax metric (target < 5%), plus a
+     shape inventory feeding the next canonical() increment.
+
 ## Out of scope (this phase)
 
 - pybind11 bridge (explicitly *after* the parity run passes).

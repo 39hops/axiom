@@ -15,7 +15,7 @@ the only dependency, and it is test-only (fetched by CMake).
 | `ax::la`   | Dense `mat`/`vec`, cache-blocked multithreaded matmul, LU, Cholesky, Householder QR, least squares |
 | `ax::st`   | PCG64 RNG (ziggurat normal), special functions (lgamma, erf, incomplete gamma/beta), 15 probability distributions with pdf/cdf/quantile/sample, descriptive statistics, hypothesis tests (t, chi-square, ANOVA, KS), OLS with inference, GLMs (logistic/Poisson via IRLS), Metropolis-Hastings MCMC, time series (ACF/PACF, AR/ARMA, periodogram) |
 | `ax::num`  | Adaptive Gauss-Kronrod and tanh-sinh quadrature, RK45 (Dormand-Prince) ODE solver, Brent root finding, Newton, optimization (Brent 1-d, BFGS, Nelder-Mead) |
-| `ax::sym`  | CAS: immutable hash-consed expression DAG, canonicalizing simplifier, symbolic differentiation, integration (table, u-substitution, parts, partial fractions), equation solving (exact polynomial roots through quartic, Durand-Kerner numeric fallback, symbolic linear systems), univariate polynomial algebra over exact rationals, expansion, text/LaTeX printers |
+| `ax::sym`  | CAS: immutable hash-consed expression DAG, canonicalizing simplifier, symbolic differentiation, integration (table, u-substitution, parts, partial fractions), equation solving (exact polynomial roots through quartic, Durand-Kerner numeric fallback, symbolic linear systems), univariate polynomial algebra over exact rationals, expansion, text/LaTeX printers, sympy-sstr parser, verification oracle (canonical forms, three-valued equivalence) |
 
 See [`docs/specs/2026-07-05-axiom-design.md`](docs/specs/2026-07-05-axiom-design.md)
 for the full design and roadmap (hypothesis tests, GLM, MCMC, time series,
@@ -71,9 +71,17 @@ inputs.
 ## Status
 
 Phases 0–7 of the [design spec](docs/specs/2026-07-05-axiom-design.md) are
-complete (296 tests passing). Next up: the proof kernel (Phase 8) and the
-optional CUDA backend (Phase 9). Implementation plans for every phase live
-in [`docs/plans/`](docs/plans/).
+complete, plus Phase 8 — the [llmopt verification
+oracle](docs/specs/2026-07-18-llmopt-oracle.md) (330 tests passing): a
+sympy-`sstr` parser, `canonical()`/`equivalent()` primitives with a strict
+soundness contract (EQUIVALENT only on structural proof, NOT_EQUIVALENT only
+on a confirmed numeric witness, UNDECIDED otherwise — never guessed), and the
+`axiom-oracle` JSONL harness for the sympy parity audit (~11 ms/row Release
+on farm-shaped `equiv_mod_const` rows). axiom becomes llmopt's oracle of
+record only after that parity run passes; the pybind11 bridge lands after
+parity. Next up: the proof kernel (Phase 9) and the optional CUDA backend
+(Phase 10). Implementation plans for every phase live in
+[`docs/plans/`](docs/plans/).
 
 ## License
 
