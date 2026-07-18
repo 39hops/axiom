@@ -44,6 +44,17 @@ endif()
 add_executable(axiom-oracle tools/oracle_main.cpp)
 target_link_libraries(axiom-oracle PRIVATE axiom)
 
+# Optional Python bridge (llmopt shadow-mode consumer). Off by default so
+# the STL-only core stays dependency-free; pybind11 is bridge-only, like
+# GoogleTest is test-only. Point CMake at pybind11 via
+# -Dpybind11_DIR=$(python -m pybind11 --cmakedir).
+option(AXIOM_BUILD_PYTHON "Build the axiom_sym pybind11 module" OFF)
+if(AXIOM_BUILD_PYTHON)
+  find_package(pybind11 CONFIG REQUIRED)
+  pybind11_add_module(axiom_sym bindings/axiom_sym.cpp)
+  target_link_libraries(axiom_sym PRIVATE axiom)
+endif()
+
 option(AXIOM_BUILD_TESTS "Build tests" ON)
 if(AXIOM_BUILD_TESTS)
   enable_testing()
