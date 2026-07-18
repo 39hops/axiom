@@ -120,11 +120,21 @@ expr make_pow(const expr& b, const expr& e) {
           return make_num(*folded);
       }
     }
-    // (x^a)^b with numeric a, b -> x^(a*b)
+    // (x^a)^b -> x^(a*b) only when sound over the reals: b an integer
+    // (always valid), or -1 <= a <= 1 (x^a is the principal branch, e.g.
+    // (sqrt(x))^2 = x). NOT for even a with fractional b: (x^2)^(1/2) is
+    // |x|, not x.
     if (bn.k == kind::pow) {
       const node& inner_exp = deref(bn.a[1]);
-      if (inner_exp.k == kind::num)
-        return make_pow(bn.a[0], make_num(inner_exp.val * en.val));
+      if (inner_exp.k == kind::num) {
+        const rational one{bigint(1)};
+        const rational neg_one{bigint(-1)};
+        const bool outer_int = en.val.den() == bigint(1);
+        const bool inner_small =
+            !(inner_exp.val > one) && !(inner_exp.val < neg_one);
+        if (outer_int || inner_small)
+          return make_pow(bn.a[0], make_num(inner_exp.val * en.val));
+      }
     }
   }
   return pool::intern(node{kind::pow, {}, {}, {b, e}, 0});

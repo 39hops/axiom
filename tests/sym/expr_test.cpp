@@ -96,3 +96,18 @@ TEST(expr_canon, negation_and_subtraction) {
   EXPECT_TRUE(e.same(expr::num(-1) * x + expr::num(-1) * y));
   EXPECT_TRUE((expr::num(3) * x - expr::num(2) * x).same(x));
 }
+
+TEST(expr_canon, pow_of_pow_collapse_is_sound_over_reals) {
+  // (x^2)^(1/2) is |x|, not x: even inner exponent + fractional outer must
+  // NOT collapse via exponent multiplication (parity-audit soundness bug).
+  const expr half = expr::num(ax::rational(ax::bigint(1), ax::bigint(2)));
+  const expr x2_sqrt = x.pow(expr::num(2)).pow(half);
+  EXPECT_FALSE(x2_sqrt.same(x));
+  EXPECT_NEAR(x2_sqrt.eval({{"x", -3.0}}), 3.0, 1e-12);  // |−3|
+
+  // Integer outer exponent always collapses: ((x^a)^n) = x^(an).
+  EXPECT_TRUE(x.pow(half).pow(expr::num(4)).same(x.pow(expr::num(2))));
+  // |inner| <= 1 collapses (principal-branch domain convention, as sympy):
+  EXPECT_TRUE(x.pow(half).pow(half).same(
+      x.pow(expr::num(ax::rational(ax::bigint(1), ax::bigint(4))))));
+}
