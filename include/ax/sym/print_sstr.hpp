@@ -17,4 +17,9 @@ namespace ax::sym {
 
 std::string to_sstr(const expr& e);
 
+/** Three-way comparison equal to sympy's default_sort_key ordering (the
+    printer's internal comparator, exposed for construction-time rules
+    like trig minus-extraction in ax::mathgen). */
+int sympy_sort_cmp(const expr& a, const expr& b);
+
 }  // namespace ax::sym

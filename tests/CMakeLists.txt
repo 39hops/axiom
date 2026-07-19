@@ -49,6 +49,7 @@ add_executable(ax_tests
   sym/jsonl_test.cpp
   sym/print_sstr_test.cpp
   pyrand/pyrand_test.cpp
+  mathgen/expression_test.cpp
 )
 target_compile_definitions(ax_tests PRIVATE
   AX_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

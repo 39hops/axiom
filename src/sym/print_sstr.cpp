@@ -328,8 +328,11 @@ std::vector<expr> ordered_terms(const expr& add) {
       if (t.is_num()) numarg = &t;
       else other = &t;
     }
+    // sympy requires the Mul to have exactly two args (coeff + one factor):
+    // 5 - x qualifies, 2 - 16*x*cos(x) does not (falls to monomial sort).
     if (numarg && other && kZero < numarg->value() && other->is_mul() &&
-        other->args()[0].is_num() && other->args()[0].value() < kZero)
+        other->args().size() == 2 && other->args()[0].is_num() &&
+        other->args()[0].value() < kZero)
       return {*numarg, *other};
   }
 
@@ -548,5 +551,9 @@ std::string print(const expr& e) {
 }  // namespace
 
 std::string to_sstr(const expr& e) { return print(e); }
+
+int sympy_sort_cmp(const expr& a, const expr& b) {
+  return cmp_sort_key(a, b);
+}
 
 }  // namespace ax::sym
