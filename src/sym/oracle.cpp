@@ -6,12 +6,14 @@
 #include <ax/sym/poly.hpp>
 
 #include <array>
+#include <functional>
 #include <vector>
 #include <cmath>
 #include <cstdlib>
 #include <map>
 #include <numbers>
 #include <set>
+#include <iostream>
 #include <string>
 
 namespace ax::sym {
@@ -192,6 +194,49 @@ bool eval_at(const expr& e, std::map<std::string, double>& env, double& out) {
 
 expr canonical(const expr& e, const expr& x) {
   ratio r = as_ratio(e, x);
+  // factored-form cancellation BEFORE expand: hash-consing makes shared
+  // factors (incl. radical sums like 2*sqrt(x)+sqrt(5)) pointer-equal
+  // across num/den, and expand destroys that structure. Divide the
+  // factored numerator by each denominator factor; accept only a clean
+  // result (no negative powers / no inverted-Add wrappers survive).
+  if (!(r.den.is_num())) {
+    const std::function<bool(const expr&)> dirty = [&](const expr& q) {
+      if (q.is_pow() && q.args()[1].is_num() && q.args()[1].value() < kZero)
+        return true;
+      for (const expr& a : q.args())
+        if (dirty(a)) return true;
+      return false;
+    };
+    // scalar-multiple adds: make_mul distributes numerics into Add
+    // factors, so the numerator may hold c*f where the denominator
+    // holds f (18*sqrt(x)+9*sqrt(5) vs 2*sqrt(x)+sqrt(5)). Detect via
+    // the first-term ratio and cancel to the constant.
+    const auto divide_factor = [&](expr t, const expr& f) {
+      if (f.is_add() && t.is_mul()) {
+        for (const expr& g : t.args()) {
+          if (!g.is_add() || g.args().size() != f.args().size()) continue;
+          // first-term ratio, dividing factor-wise (a bare g0/f0 with a
+          // Mul f0 builds pow(mul,-1) and never cancels)
+          expr c = g.args()[0];
+          const expr& f0 = f.args()[0];
+          if (f0.is_mul())
+            for (const expr& h : f0.args()) c = c / h;
+          else
+            c = c / f0;
+          if (!c.is_num()) continue;
+          if (g.same(expr::num(c.value()) * f))
+            return (t / g) * c;
+        }
+      }
+      return t / f;
+    };
+    expr trial = r.num;
+    if (r.den.is_mul())
+      for (const expr& f : r.den.args()) trial = divide_factor(trial, f);
+    else
+      trial = divide_factor(trial, r.den);
+    if (!dirty(trial)) r = {trial, expr::num(1)};
+  }
   expr num = expand(r.num);
   expr den = expand(r.den);
   if (num.is_num() && num.value() == kZero) return expr::num(0);

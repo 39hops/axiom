@@ -283,8 +283,14 @@ std::vector<expr> i_usub(const expr& node) {
   for (const expr& g : uniq) {
     const expr dg = sym::diff(g, x);
     if (dg.is_num() && dg.value() == ax::rational{}) continue;
-    // cancel + simplify(doit=False) ~ canonical rational normalization
-    const expr q = replace_subtree(sym::canonical(f / dg, x), g, kU);
+    // cancel + simplify(doit=False) ~ canonical rational normalization.
+    // canonical rewrites sqrt-fn atoms to pow form, so the substitution
+    // target must be matched in BOTH spellings (measured: every
+    // sqrt-argument u-sub chain in the L4 worklist missed because the
+    // original g node no longer existed after canonicalization).
+    const expr fq = sym::canonical(f / dg, x);
+    expr q = replace_subtree(fq, g, kU);
+    if (contains(q, x)) q = replace_subtree(q, sym::canonical(g, x), kU);
     if (contains(q, x) || !contains(q, kU)) continue;
     out.push_back(expr::subs_carrier(expr::integral(q, kU), kU, g));
   }
