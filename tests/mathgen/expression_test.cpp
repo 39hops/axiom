@@ -18,11 +18,12 @@ using ax::sym::to_sstr;
 TEST(MathgenExpression, L1L3ExactSstrParity) {
   // Gate: byte-exact equality with llmopt's sympy generator per
   // (level, seed). Fixture from the authentic problems.py module.
+  int cases = 0, failures = 0;
+  for (const char* fixture : {"expression_l1_3.tsv", "expression_l4.tsv"}) {
   std::ifstream in(std::string(AX_SOURCE_DIR) +
-                   "/tests/mathgen/fixtures/expression_l1_3.tsv");
+                   "/tests/mathgen/fixtures/" + fixture);
   ASSERT_TRUE(in.good()) << "regenerate via WSL llmopt venv (see plan)";
   std::string line;
-  int cases = 0, failures = 0;
   while (std::getline(in, line)) {
     if (line.empty() || line[0] == '#') continue;
     const auto t1 = line.find('\t');
@@ -36,7 +37,8 @@ TEST(MathgenExpression, L1L3ExactSstrParity) {
     EXPECT_EQ(got, want) << "level " << level << " seed " << seed;
     if (got != want) ++failures;
   }
-  EXPECT_EQ(cases, 300);
+  }
+  EXPECT_EQ(cases, 450);
   EXPECT_EQ(failures, 0) << failures << "/" << cases << " diverge";
 }
 
