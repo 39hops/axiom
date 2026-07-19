@@ -310,6 +310,7 @@ std::vector<expr> i_parts(const expr& node) {
 }  // namespace
 
 void add_tranche2(rule_set& r);  // rules2.cpp
+void add_tranche3(rule_set& r);  // rules3.cpp
 
 const rule_set& default_rules() {
   static const rule_set rs = [] {
@@ -333,6 +334,13 @@ const rule_set& default_rules() {
         {"i_parts", i_parts},
     };
     add_tranche2(r);
+    add_tranche3(r);
+    r.algebra.emplace_back(
+        "cancel", [](const expr& e) -> std::optional<expr> {
+          const expr n = sym::canonical(e, expr::symbol("x"));
+          if (n.same(e)) return std::nullopt;
+          return n;
+        });
     r.algebra.emplace_back(
         "expand", [](const expr& e) -> std::optional<expr> {
           const expr n = sym::expand(e);

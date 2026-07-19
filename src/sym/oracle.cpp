@@ -1,5 +1,6 @@
 #include <ax/sym/oracle.hpp>
 
+#include <ax/sym/budget.hpp>
 #include <ax/sym/calc.hpp>
 #include <ax/sym/expand.hpp>
 #include <ax/sym/poly.hpp>
@@ -41,7 +42,16 @@ ratio ratio_pow(const expr& base, const expr& ex, const expr& x) {
     if (ns.size() <= 2 ||
         (ns.size() <= 3 && ns[0] == '-')) {  // fits easily in long long
       const long long k = std::strtoll(ns.c_str(), nullptr, 10);
-      if (k != 0 && std::llabs(k) <= kMaxExpandedExponent) {
+      // blowup guard: distributing base^k through the ratio machinery
+      // feeds expand(); bound k by the base's additive width up front
+      const double bw = static_cast<double>(
+          base.is_add() ? base.args().size() : 1);
+      double est = 1.0;
+      for (long long i = 1; i <= std::llabs(k) && est < 1e9; ++i)
+        est *= (bw + static_cast<double>(std::llabs(k) - i)) /
+               static_cast<double>(i);
+      if (k != 0 && std::llabs(k) <= kMaxExpandedExponent &&
+          est <= 3000.0) {
         ratio b = as_ratio(base, x);
         const expr kk = expr::num(std::llabs(k));
         if (k > 0) return {b.num.pow(kk), b.den.pow(kk)};
@@ -62,6 +72,7 @@ ratio ratio_pow(const expr& base, const expr& ex, const expr& x) {
 }
 
 ratio as_ratio(const expr& e, const expr& x) {
+  check_work_budget();
   switch (e.k()) {
     case kind::num:
     case kind::sym:

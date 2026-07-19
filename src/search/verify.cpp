@@ -1,9 +1,12 @@
 #include <ax/search/search.hpp>
 
+#include <ax/sym/budget.hpp>
 #include <ax/sym/calc.hpp>
 #include <ax/sym/count_ops.hpp>
 #include <ax/sym/oracle.hpp>
 
+#include <chrono>
+#include <iostream>
 #include <set>
 
 namespace ax::search {
@@ -63,6 +66,12 @@ bool has_integral(const expr& e) {
 }
 
 }  // namespace
+
+namespace {
+thread_local long long size_rejects_ = 0;
+}  // namespace
+
+long long verify_size_reject_count() { return size_rejects_; }
 
 bool is_solved(const expr& e) {
   if (is_carrier(e)) return false;
@@ -128,6 +137,14 @@ expr doit_no_integrals(const expr& e) {
 bool verify_edge(const expr& parent, const expr& child,
                  const external_slots& ext) {
   using sym::verdict;
+  // size-gate (the native RULE_WALL analogue for verification: no
+  // preemption, so bound by refusing oversized checks — a rejected
+  // legal edge costs coverage, never soundness). The q-l5-23 wedge was
+  // a single canonical() on a log^2 monster child inside this call.
+  if (sym::count_ops(parent) + sym::count_ops(child) > 400) {
+    ++size_rejects_;
+    return false;
+  }
   const auto decide = [&](const expr& a, const expr& b,
                           const expr& var) -> bool {
     const verdict v = sym::equivalent(a, b, var);
@@ -137,7 +154,23 @@ bool verify_edge(const expr& parent, const expr& child,
     return ext.equivalence ? ext.equivalence(a, b) : false;
   };
 
+  const auto t0 = std::chrono::steady_clock::now();
+  struct slow_report {
+    std::chrono::steady_clock::time_point t0;
+    const expr& p;
+    ~slow_report() {
+      const double dt = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - t0)
+                            .count();
+      if (dt > 2.0)
+        std::cerr << "[slow-verify] " << sym::count_ops(p) << " ops "
+                  << dt << "s" << std::endl;
+    }
+  } reporter{t0, parent};
   try {
+    // the native RULE_WALL: all sym work below is budget-polled;
+    // expiry lands in the catch as a conservative edge rejection
+    sym::work_budget_scope budget(std::chrono::milliseconds(3000));
     if (has_integral(parent)) {
       // equality mod constant: d/dv of the difference vanishes for every
       // free symbol. Structurally-equal Integral atoms cancel in the

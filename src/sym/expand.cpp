@@ -1,5 +1,7 @@
 #include <ax/sym/expand.hpp>
 
+#include <ax/sym/budget.hpp>
+
 #include <vector>
 
 #include <string>
@@ -17,7 +19,10 @@ expr mul_distribute(const expr& a, const expr& b) {
   }
   if (b.is_add()) {
     expr sum = expr::num(0);
-    for (const expr& t : b.args()) sum = sum + mul_distribute(a, t);
+    for (const expr& t : b.args()) {
+      check_work_budget();
+      sum = sum + mul_distribute(a, t);
+    }
     return sum;
   }
   return a * b;
@@ -63,6 +68,15 @@ expr expand(const expr& e) {
       const expr ex = expand(e.args()[1]);
       const int k = small_int_exponent(ex);
       if (k != 0 && base.is_add()) {
+        // multinomial blowup guard: (t-term sum)^k materializes
+        // ~C(t+k-1,k) terms; a small count_ops input can explode into
+        // millions (measured: an L8 sqrt-monster child held one expand
+        // call for 13+ minutes at 1GB). Oversized stays unexpanded —
+        // the oracle then answers UNDECIDED, which is conservative.
+        const double t = static_cast<double>(base.args().size());
+        double est = 1.0;
+        for (int i = 1; i <= k; ++i) est *= (t + k - i) / i;
+        if (est > 3000.0) return base.pow(ex);
         expr prod = base;
         for (int i = 1; i < k; ++i) prod = mul_distribute(prod, base);
         return prod;

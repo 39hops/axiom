@@ -4,6 +4,7 @@
 #include <ax/sym/expand.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <unordered_set>
 
 namespace ax::search {
@@ -49,13 +50,16 @@ expr subs_eval_pass(const expr& e) {
   return e;
 }
 
-bool replay_verify(const expr& root, const std::vector<std::string>& history,
-                   const rule_set& rules) {
+bool replay_verify(
+    const expr& root, const std::vector<std::string>& history,
+    const rule_set& rules,
+    std::optional<std::chrono::steady_clock::time_point> deadline) {
   // Backtracking walk over same-name children with verify_p = 1
   // (the labels-are-not-unique lesson).
   successor_options opt;
   opt.use_macros = true;
   opt.verify_p = 1.0;
+  opt.deadline = deadline;
   std::function<bool(const state&, std::size_t)> walk =
       [&](const state& cur, std::size_t i) -> bool {
     if (i == history.size()) return true;
@@ -83,8 +87,14 @@ search_result beam_search(const expr& root, const rule_set& rules,
   successor_options sopt;
   sopt.use_macros = opt.use_macros;
   sopt.verify_p = opt.verify_p;
+  sopt.deadline = opt.deadline;
 
+  bool expired = false;
   for (int ply = 0; ply < opt.max_plies && !budget_hit; ++ply) {
+    if (opt.deadline && std::chrono::steady_clock::now() > *opt.deadline) {
+      expired = true;
+      break;
+    }
     std::vector<state> candidates;
     for (const state& s : beam) {
       auto kids = successors(s, rules, sopt);
@@ -146,12 +156,15 @@ search_result beam_search(const expr& root, const rule_set& rules,
     }
     return {true, *best_solved, nodes};
   }
+  // deadline may also have expired inside successors (between-fire check)
+  if (opt.deadline && std::chrono::steady_clock::now() > *opt.deadline)
+    expired = true;
   const state& fallback =
       *std::min_element(beam.begin(), beam.end(),
                         [&](const state& a, const state& b) {
                           return eval_fn(a) < eval_fn(b);
                         });
-  return {false, fallback, nodes};
+  return {false, fallback, nodes, false, expired};
 }
 
 }  // namespace ax::search

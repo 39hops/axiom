@@ -1,0 +1,3 @@
+[slow-fire] i_linear_basis 59 ops 100.104s
+== per-level (budget 200, wall 111.401s):
+  L8: 0/1

@@ -463,6 +463,7 @@ std::vector<expr> i_sqrt_basis(const expr& node) {
   const auto un = unpack_i(node);
   if (!un) return {};
   const auto& [f, x] = *un;
+  if (sym::count_ops(f) > 60) return {};  // size pre-gate
   // collect sqrt-of-poly radicands (fn sqrt and pow ±1/2 forms)
   std::vector<expr> bases;
   const std::function<void(const expr&)> walk = [&](const expr& e) {

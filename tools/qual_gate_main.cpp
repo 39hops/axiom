@@ -5,6 +5,7 @@
     replay verification. Chains and misses stream to stdout as TSV. */
 #include <ax/search/search.hpp>
 #include <ax/sym/calc.hpp>
+#include <ax/sym/count_ops.hpp>
 #include <ax/sym/jsonl.hpp>
 #include <ax/sym/oracle.hpp>
 #include <ax/sym/parse.hpp>
@@ -33,7 +34,8 @@ int main(int argc, char** argv) {
     return 2;
   }
   const sym::expr x = sym::expr::symbol("x");
-  std::map<int, int> solved, edge_certified, total;
+  std::map<int, int> solved, edge_certified, expired, total;
+  std::map<int, long long> size_rejects;
   std::string line;
   double wall_total = 0.0;
   while (std::getline(in, line)) {
@@ -44,21 +46,39 @@ int main(int argc, char** argv) {
     ++total[level];
     const sym::expr root = sym::parse(row.at("root"));
     search::beam_options opt;
+    // per-root wall (the plan's per-rule-budget-as-clock-check): abort a
+    // root that exceeds its deadline; an aborted root is an honest
+    // unsolved, never a hung gate
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(20);
+    opt.deadline = deadline;
     opt.width = width;
     opt.max_plies = plies;
     opt.max_nodes = budget;
     opt.use_macros = true;
     const auto t0 = std::chrono::steady_clock::now();
+    const long long sr0 = search::verify_size_reject_count();
     const auto res = search::beam_search(root, search::default_rules(), opt);
+    size_rejects[level] += search::verify_size_reject_count() - sr0;
     const double dt =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
             .count();
     wall_total += dt;
     bool ok = res.solved;
     std::string why = ok ? "solved" : "unsolved";
+    if (!ok && res.deadline_expired) {
+      why = "expired";  // the wall ended this root, not the search:
+      ++expired[level];  // expired != unsolvable (llmopt farm lesson)
+    }
     if (ok) {
       const sym::expr integrand = root.args()[0];
-      const auto v = sym::equivalent(sym::diff(res.best.e, x), integrand, x);
+      // size-gate the whole-chain certificate (the wedge lesson, third
+      // face: the unbounded step was POST-search diff-back canonical on
+      // monster answers). Oversized -> edge-certified column, honestly.
+      const sym::expr dback = sym::diff(res.best.e, x);
+      auto v = sym::verdict::undecided;
+      if (sym::count_ops(dback) <= 400)
+        v = sym::equivalent(dback, integrand, x);
       if (v == sym::verdict::not_equivalent) {
         ok = false;
         why = "DIFFBACK-NOTEQ";  // a real soundness bug if it ever fires
@@ -68,11 +88,9 @@ int main(int argc, char** argv) {
         ok = false;
         why = "DIFFBACK-UNDECIDED";
         ++edge_certified[level];
-      } else if (!search::replay_verify(root, res.best.history,
-                                        search::default_rules())) {
-        ok = false;
-        why = "REPLAY-FAIL";
       }
+      // no replay pass: the gate runs verify_p=1, so every edge was
+      // already fully verified in-search (replay exists for sampled mode)
     }
     if (ok) ++solved[level];
     std::cout << row.at("id") << "\t" << level << "\t" << why << "\t"

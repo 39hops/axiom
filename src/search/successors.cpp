@@ -1,9 +1,12 @@
 #include <ax/search/search.hpp>
 
+#include <ax/sym/budget.hpp>
 #include <ax/sym/calc.hpp>
 #include <ax/sym/count_ops.hpp>
 
 #include <algorithm>
+#include <iostream>
+#include <chrono>
 #include <map>
 #include <unordered_set>
 
@@ -124,6 +127,9 @@ std::vector<std::pair<std::string, state>> successors(
 
   const auto emit = [&](const std::string& name, const expr& child_expr) {
     if (seen.count(child_expr)) return;
+    if (opt.deadline &&
+        std::chrono::steady_clock::now() > *opt.deadline)
+      return;  // expired: stop paying verification for new children
     const bool pay_oracle =
         opt.verify_p >= 1.0 ||
         static_cast<double>(child_expr.hash() % 1000) <
@@ -137,16 +143,30 @@ std::vector<std::pair<std::string, state>> successors(
     out.emplace_back(name, std::move(child));
   };
 
+  const auto expired = [&] {
+    return opt.deadline &&
+           std::chrono::steady_clock::now() > *opt.deadline;
+  };
   const auto fire = [&](const rule& r, const expr& node) {
     const auto key = std::make_pair(&r.first, node.hash());
     auto it = rule_cache.find(key);
     if (it == rule_cache.end()) {
       std::vector<expr> rewrites;
+      const auto t0 = std::chrono::steady_clock::now();
       try {
+        sym::work_budget_scope budget(std::chrono::milliseconds(2000));
         rewrites = r.second(node);
       } catch (const std::exception&) {
-        // a crashing rule costs one move, never the search
+        // a crashing or budget-expired rule costs one move, never the
+        // search (work_expired derives runtime_error and lands here)
       }
+      const double dt = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - t0)
+                            .count();
+      if (dt > 2.0)  // slow-fire observability (the wedge-hunt lesson)
+        std::cerr << "[slow-fire] " << r.first << " "
+                  << sym::count_ops(node) << " ops " << dt << "s"
+                  << std::endl;
       it = rule_cache.emplace(key, std::move(rewrites)).first;
     }
     return it->second;
@@ -159,6 +179,7 @@ std::vector<std::pair<std::string, state>> successors(
     for (const rule& r : rules.macros) drules.push_back(&r);
   for (const expr& node : sorted_atoms(s.e, "Derivative")) {
     for (const rule* r : drules) {
+      if (expired()) return out;
       if (!want(r->first)) continue;
       for (const expr& rw : fire(*r, node))
         emit(r->first, replace_node(s.e, node, rw));
@@ -174,6 +195,7 @@ std::vector<std::pair<std::string, state>> successors(
     const expr inner =
         nested ? expr::integral(node.args()[0], node.args()[1]) : node;
     for (const rule* r : irules) {
+      if (expired()) return out;
       if (!want(r->first)) continue;
       for (const expr& rw : fire(*r, inner)) {
         expr new_node = rw;
@@ -194,6 +216,7 @@ std::vector<std::pair<std::string, state>> successors(
   for (const algebra_move& m : rules.algebra) amoves.push_back(&m);
   for (const algebra_move& m : rules.external.algebra) amoves.push_back(&m);
   for (const algebra_move* m : amoves) {
+    if (expired()) return out;
     if (!want(m->first)) continue;
     std::optional<expr> next;
     try {

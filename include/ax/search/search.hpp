@@ -14,6 +14,7 @@
     conservative-sound). */
 #include <ax/sym/expr.hpp>
 
+#include <chrono>
 #include <functional>
 #include <optional>
 #include <string>
@@ -96,10 +97,19 @@ expr doit_no_integrals(const expr& e);
 bool verify_edge(const expr& parent, const expr& child,
                  const external_slots& ext);
 
+/** Running count of verify_edge size-gate rejections (thread-local).
+    The gate reads per-root deltas so the size-gate's coverage cost is a
+    measured ledger column, never an assumption. */
+long long verify_size_reject_count();
+
 // -------------------------------------------------------------- successors
 
 struct successor_options {
   bool use_macros = false;
+  /** Hard wall for this expansion: checked between rule fires (rules are
+      finite, so between-fire checks bound the wall without preemption).
+      Expired -> return the children found so far. */
+  std::optional<std::chrono::steady_clock::time_point> deadline;
   double verify_p = 1.0;  // deterministic sampling in the child key
   const std::vector<std::string>* only_rules = nullptr;
   std::function<bool(const std::string& rule_name)> move_filter;
@@ -116,10 +126,13 @@ struct search_result {
   state best;
   long long nodes = 0;
   bool corrupted = false;  // sampled-mode winning path failed full replay
+  bool deadline_expired = false;  // the wall, not the search, ended this
 };
 
 struct beam_options {
   int width = 8;
+  /** Per-search wall, forwarded to successors and checked per ply. */
+  std::optional<std::chrono::steady_clock::time_point> deadline;
   int max_plies = 12;
   std::optional<long long> max_nodes;
   bool use_macros = false;
@@ -139,8 +152,10 @@ struct beam_options {
 
 /** Re-verify a winning path (bare names, backtracking over same-name
     siblings) with verify_p = 1. The soundness boundary. */
-bool replay_verify(const expr& root, const std::vector<std::string>& history,
-                   const rule_set& rules);
+bool replay_verify(
+    const expr& root, const std::vector<std::string>& history,
+    const rule_set& rules,
+    std::optional<std::chrono::steady_clock::time_point> deadline = {});
 
 search_result beam_search(const expr& root, const rule_set& rules,
                           const beam_options& opt = {});

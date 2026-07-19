@@ -1,0 +1,4 @@
+q-l5-19	5	DIFFBACK-UNDECIDED	8	0.0886905	sqrt(3)*(8*x + 2)*sqrt(x**3 - x + 1)
+q-l5-20	5	unsolved	200	1.195	-
+q-l5-21	5	solved	80	0.355745	-x**3*log(x) + (3*x**3*log(x) + x**3)*log(x)
+q-l5-22	5	solved	70	0.273572	-x*log(3*x) + (x*log(3*x) + x)*log(3*x)

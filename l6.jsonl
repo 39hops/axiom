@@ -1,0 +1,60 @@
+{"id": "q-l6-0", "level": 6, "root": "Integral(2*(9*x**4 + 6*x**2 - 8*x + 8)/(9*x**4 + 12*x**2 + 4), x)"}
+{"id": "q-l6-1", "level": 6, "root": "Integral(2*(2*x**4 + 4*x**3 + 10*x**2 - 3*x - 5)/(4*x**4 + 8*x**3 + 8*x**2 + 4*x + 1), x)"}
+{"id": "q-l6-2", "level": 6, "root": "Integral((8 - 12*x)*sin(3*x**2 - 4*x + 3), x)"}
+{"id": "q-l6-3", "level": 6, "root": "Integral((95*x**4 - 38*x**3 + 72*x**2 - 32*x + 20)/(25*x**4 - 10*x**3 + 21*x**2 - 4*x + 4), x)"}
+{"id": "q-l6-4", "level": 6, "root": "Integral(sqrt(2)*(32*x**3*(3*x**2 + 2)*sqrt(4*x**3 - 3*x + 5) + 9*sqrt(2)*sqrt(x*(x**2 + 2))*(4*x**2 - 1)*(3*x**2 - x + 2) + 6*sqrt(2)*sqrt(x*(x**2 + 2))*sqrt(4*x**3 - 3*x + 5)*(16*sqrt(2)*x**2*sqrt(x*(x**2 + 2)) + 2*x*log(2*x) + x + (6*x - 1)*sqrt(4*x**3 - 3*x + 5)))/(4*sqrt(x*(x**2 + 2))*sqrt(4*x**3 - 3*x + 5)), x)"}
+{"id": "q-l6-5", "level": 6, "root": "Integral((sqrt(1 - x**2)*((60*x + 6)*exp(5*x**2 + x + 4) - 4*exp(x)*sin(4*x) + exp(x)*cos(4*x) + 5) + 3)/sqrt(1 - x**2), x)"}
+{"id": "q-l6-6", "level": 6, "root": "Integral(12*x**2*log(x)**2 + 8*x**2*log(x) + 16*x*cos(4*x**2 + x + 1) + 2*cos(4*x**2 + x + 1) + 4 + 15/sqrt(1 - 9*x**2), x)"}
+{"id": "q-l6-7", "level": 6, "root": "Integral((39*x**4 - 52*x**3 + 129*x**2 - 72*x + 60)/(9*x**4 - 12*x**3 + 28*x**2 - 16*x + 16), x)"}
+{"id": "q-l6-8", "level": 6, "root": "Integral(2*((x**2 + 1)*((5*x + 2)*cos(5*x**2 + 4*x + 4) - exp(4*x)*sin(2*x) + 2*exp(4*x)*cos(2*x) + 2) + 3)/(x**2 + 1), x)"}
+{"id": "q-l6-9", "level": 6, "root": "Integral((20*x**4 - 20*x**3 + 123*x**2 - 38*x + 77)/(4*x**4 - 4*x**3 + 21*x**2 - 10*x + 25), x)"}
+{"id": "q-l6-10", "level": 6, "root": "Integral(5*(8*x + 4)*cos(4*x**2 + 4*x + 5) + 5*exp(x)*sin(2*x) + 10*exp(x)*cos(2*x), x)"}
+{"id": "q-l6-11", "level": 6, "root": "Integral(-x*log(3*x)*sin(x) + log(3*x)*cos(x) + cos(x), x)"}
+{"id": "q-l6-12", "level": 6, "root": "Integral((16*x**4 + 32*x**3 + 102*x**2 + 52*x + 71)/(4*x**4 + 8*x**3 + 24*x**2 + 20*x + 25), x)"}
+{"id": "q-l6-13", "level": 6, "root": "Integral((8*x**4 + 32*x**3 + 69*x**2 + 68*x + 26)/(2*(x**4 + 4*x**3 + 8*x**2 + 8*x + 4)), x)"}
+{"id": "q-l6-14", "level": 6, "root": "Integral((18*x + 6)*exp(3*x**2 + 2*x + 1), x)"}
+{"id": "q-l6-15", "level": 6, "root": "Integral(4*x*(-2*x*log(3*x)*sin(2*x) + 2*log(3*x)*cos(2*x) + cos(2*x)), x)"}
+{"id": "q-l6-16", "level": 6, "root": "Integral((6*x**3 + 4*sqrt(x + 4)*(9*x**2*sqrt(x + 4) - 2*(x + 2)*sin(x**2 + 4*x + 1)) + 15)/(2*sqrt(x + 4)), x)"}
+{"id": "q-l6-17", "level": 6, "root": "Integral(14*x*log(2*x) + 7*x + (8*x + 2)*exp(4*x**2 + 2*x + 3) + 20*exp(4*x)*sin(4*x) + 20*exp(4*x)*cos(4*x), x)"}
+{"id": "q-l6-18", "level": 6, "root": "Integral(3 + 2/x**2 - 4/x**3, x)"}
+{"id": "q-l6-19", "level": 6, "root": "Integral((24*x + 12)*cos(4*x*(x + 1)), x)"}
+{"id": "q-l6-20", "level": 6, "root": "Integral((8*x**4 - 16*x**3 + 15*x**2 - 14*x + 16)/(2*(x**4 - 2*x**3 + 3*x**2 - 2*x + 1)), x)"}
+{"id": "q-l6-21", "level": 6, "root": "Integral((50*x + 20)*cos(x*(5*x + 4)) + 27*exp(3*x)*sin(4*x) + 36*exp(3*x)*cos(4*x), x)"}
+{"id": "q-l6-22", "level": 6, "root": "Integral(((4*x**2 + 1)*(10*exp(2*x)*sin(3*x) + 15*exp(2*x)*cos(3*x) + exp(x)*sin(3*x) + 3*exp(x)*cos(3*x) + 1) + 12)/(4*x**2 + 1), x)"}
+{"id": "q-l6-23", "level": 6, "root": "Integral(2*(65*x**4 + 104*x**3 + 88*x**2 + 25*x + 6)/(25*x**4 + 40*x**3 + 36*x**2 + 16*x + 4), x)"}
+{"id": "q-l6-24", "level": 6, "root": "Integral(2*exp(2*x)*sin(x) + 12*exp(2*x)*sin(4*x) + exp(2*x)*cos(x) + 24*exp(2*x)*cos(4*x) + 3 + 18/sqrt(1 - 4*x**2), x)"}
+{"id": "q-l6-25", "level": 6, "root": "Integral((16*x + 6)*cos(4*x**2 + 3*x + 5), x)"}
+{"id": "q-l6-26", "level": 6, "root": "Integral(45*x**2/sqrt(5*x + 3) + 36*x*sqrt(5*x + 3) + 45*x/(2*sqrt(5*x + 3)) + 9*sqrt(5*x + 3) + 15*exp(3*x)*sin(2*x) + 10*exp(3*x)*cos(2*x) + 7 + 225/(2*sqrt(5*x + 3)) + 7/sqrt(1 - x**2), x)"}
+{"id": "q-l6-27", "level": 6, "root": "Integral((75*x**4 + 90*x**3 + 10*x**2 - 40*x - 12)/(x**2*(25*x**2 + 30*x + 9)), x)"}
+{"id": "q-l6-28", "level": 6, "root": "Integral(24*x**2*log(3*x) + 8*x**2 + 9*exp(3*x)*sin(4*x) + 12*exp(3*x)*cos(4*x) - 4*exp(x)*sin(4*x) + exp(x)*cos(4*x), x)"}
+{"id": "q-l6-29", "level": 6, "root": "Integral((48*x**4 + 48*x**3 + 62*x**2 + 8*x + 7)/(2*(4*x**4 + 4*x**3 + 5*x**2 + 2*x + 1)), x)"}
+{"id": "q-l6-30", "level": 6, "root": "Integral(6*x*(-2*x*log(3*x)*sin(2*x) + 2*log(3*x)*cos(2*x) + cos(2*x)), x)"}
+{"id": "q-l6-31", "level": 6, "root": "Integral(2*x*(x*log(4*x)*cos(x) + 2*log(4*x)*sin(x) + sin(x)), x)"}
+{"id": "q-l6-32", "level": 6, "root": "Integral(6*sqrt(2)*exp(x)*sin(x + pi/4) + 4*log(x)**2 + 10*log(x) + 4 + 7/sqrt(1 - x**2), x)"}
+{"id": "q-l6-33", "level": 6, "root": "Integral((8*x + 4)*exp(x**2 + x + 1), x)"}
+{"id": "q-l6-34", "level": 6, "root": "Integral((-40*x - 10)*sin(4*x**2 + 2*x + 1), x)"}
+{"id": "q-l6-35", "level": 6, "root": "Integral((30*x + 15)*exp(3*x**2 + 3*x + 2), x)"}
+{"id": "q-l6-36", "level": 6, "root": "Integral((12*x - 9)*cos(2*x**2 - 3*x + 5), x)"}
+{"id": "q-l6-37", "level": 6, "root": "Integral(9*x**2*log(4*x) + 3*x**2 - 4*exp(x)*sin(2*x) + 2*exp(x)*cos(2*x) + 3*log(2*x) + 8 + 9/sqrt(1 - 9*x**2), x)"}
+{"id": "q-l6-38", "level": 6, "root": "Integral(24*x**2*log(2*x) + 8*x**2 + 4*(8*x - 3)*cos(4*x**2 - 3*x + 2), x)"}
+{"id": "q-l6-39", "level": 6, "root": "Integral((125*x**4 - 200*x**3 + 339*x**2 - 180*x + 108)/(25*x**4 - 40*x**3 + 66*x**2 - 40*x + 25), x)"}
+{"id": "q-l6-40", "level": 6, "root": "Integral(6*x*(-x*log(x)*sin(x) + 2*log(x)*cos(x) + cos(x)), x)"}
+{"id": "q-l6-41", "level": 6, "root": "Integral((40*x - 16)*exp(5*x**2 - 4*x + 2), x)"}
+{"id": "q-l6-42", "level": 6, "root": "Integral((36*x + 18)*cos(3*x**2 + 3*x + 1), x)"}
+{"id": "q-l6-43", "level": 6, "root": "Integral(12*x*log(5*x)**2 + 12*x*log(5*x) + 10 + 6/(x**2 + 1) + 9/sqrt(1 - 9*x**2), x)"}
+{"id": "q-l6-44", "level": 6, "root": "Integral(3*(16*x**4 + 24*x**3 + 37*x**2 + 18*x + 6)/(16*x**4 + 24*x**3 + 33*x**2 + 18*x + 9), x)"}
+{"id": "q-l6-45", "level": 6, "root": "Integral((16*x**4 + 16*x**3 + 87*x**2 + 86*x + 104)/(4*x**4 + 4*x**3 + 21*x**2 + 10*x + 25), x)"}
+{"id": "q-l6-46", "level": 6, "root": "Integral((125*x**4 + 200*x**3 + 110*x**2 - 30*x - 12)/(x**2*(25*x**2 + 40*x + 16)), x)"}
+{"id": "q-l6-47", "level": 6, "root": "Integral((x**4 + 6*x**3 + 30*x**2 + 16*x - 3)/(x**4 + 6*x**3 + 11*x**2 + 6*x + 1), x)"}
+{"id": "q-l6-48", "level": 6, "root": "Integral((4 - 16*x)*sin(2*x**2 - x + 4) - 32*exp(2*x)*sin(4*x) + 16*exp(2*x)*cos(4*x) + 3*log(5*x)**2 + 6*log(5*x), x)"}
+{"id": "q-l6-49", "level": 6, "root": "Integral(6*x*(-2*x*log(2*x)*sin(2*x) + 2*log(2*x)*cos(2*x) + cos(2*x)), x)"}
+{"id": "q-l6-50", "level": 6, "root": "Integral(10*x*log(x)**2 + 10*x*log(x) + 6*(5*x - 1)*exp(5*x**2 - 2*x + 4), x)"}
+{"id": "q-l6-51", "level": 6, "root": "Integral((-2*x*(x - 3)*(x**2 + 1) + (x**2 + 1)**(3/2)*(-2*sqrt(x**2 + 1) + 5*log(x) + 7) + sqrt(x**2 + 1))/(x**2 + 1)**(3/2), x)"}
+{"id": "q-l6-52", "level": 6, "root": "Integral((30*x - 5)*cos(3*x**2 - x + 4), x)"}
+{"id": "q-l6-53", "level": 6, "root": "Integral((25*x**4 - 30*x**3 + 16*x**2 - 28*x + 14)/(25*x**4 - 30*x**3 + 29*x**2 - 12*x + 4), x)"}
+{"id": "q-l6-54", "level": 6, "root": "Integral(-4*x*sin(x**2 + 2), x)"}
+{"id": "q-l6-55", "level": 6, "root": "Integral(-2*x*log(3*x)*sin(2*x) + log(3*x)*cos(2*x) + cos(2*x), x)"}
+{"id": "q-l6-56", "level": 6, "root": "Integral((30*x**4 - 80*x**3 + 147*x**2 - 120*x + 85)/(9*x**4 - 24*x**3 + 46*x**2 - 40*x + 25), x)"}
+{"id": "q-l6-57", "level": 6, "root": "Integral((12*x + 6)*cos(3*x**2 + 3*x + 3), x)"}
+{"id": "q-l6-58", "level": 6, "root": "Integral(3*x*(-3*x*log(x)*sin(3*x) + 2*log(x)*cos(3*x) + cos(3*x)), x)"}
+{"id": "q-l6-59", "level": 6, "root": "Integral(-3*x*log(4*x)*sin(3*x) + log(4*x)*cos(3*x) + cos(3*x), x)"}

@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <fstream>
 #include <map>
 #include <string>
@@ -94,6 +95,36 @@ TEST(RulesT1, QualRootsSmokeSlice) {
   // conservative floors; the official gate number is llmopt's reference
   EXPECT_GE(solved[1], 9);
   EXPECT_GE(solved[2], 7);
+}
+
+TEST(RulesT3, PathologyRootsBoundedUnderDeadline) {
+  // llmopt-style pathology collection: roots that once wedged the gate.
+  // Contract: with a short deadline the search RETURNS (solved or not)
+  // within a small wall — no single rule fire may hold the search
+  // hostage. Guards the "budget lives inside child generation" lesson.
+  std::ifstream in(std::string(AX_SOURCE_DIR) +
+                   "/tests/search/fixtures/pathology_roots.jsonl");
+  ASSERT_TRUE(in.good());
+  std::string line;
+  while (std::getline(in, line)) {
+    if (line.empty()) continue;
+    const auto row = ax::sym::jsonl::parse_line(line);
+    const expr root = parse(row.at("root"));
+    beam_options opt;
+    opt.width = 8;
+    opt.max_plies = 12;
+    opt.max_nodes = 200;
+    opt.use_macros = true;
+    opt.deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const auto t0 = std::chrono::steady_clock::now();
+    (void)beam_search(root, default_rules(), opt);
+    const double dt =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+            .count();
+    // generous 4x margin over the deadline for the in-flight fire
+    EXPECT_LT(dt, 20.0) << row.at("id");
+  }
 }
 
 }  // namespace
