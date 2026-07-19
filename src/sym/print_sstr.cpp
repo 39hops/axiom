@@ -441,16 +441,22 @@ std::string print_pow(const expr& base, const expr& ex) {
 
 std::string print_mul(const expr& e) {
   auto [c, rest] = as_coeff_mul(e);
+  // splice pow(mul, int) factors first, folding any numeric factors the
+  // splice produces ((-1)**3 from (-sin(u))**3) into the coefficient
+  std::vector<expr> factors;
+  if (!(rest.is_num() && rest.value() == kOne))
+    for (const expr& f : factor_view(rest)) {
+      if (f.is_num())
+        c = c * f.value();
+      else
+        factors.push_back(f);
+    }
   std::string sign;
   if (c < kZero) {
     sign = "-";
     c = -c;
   }
-  // rebuild factor list: coefficient (if != 1) + rest factors, sorted
-  std::vector<expr> factors;
   if (!(c == kOne)) factors.push_back(expr::num(c));
-  if (!(rest.is_num() && rest.value() == kOne))
-    for (const expr& f : factor_view(rest)) factors.push_back(f);
   std::stable_sort(factors.begin(), factors.end(),
                    [](const expr& x, const expr& y) {
                      return cmp_sort_key(x, y) < 0;

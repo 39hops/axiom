@@ -24,3 +24,18 @@
 4. L4–L8 builders + the full 10⁴ (level, seed) parity gate; divergences documented per llmopt spec. Commit `feat(mathgen): L4-L8 generator, 10^4-pair parity gate`.
 
 **Non-goals:** limit/complex/matrix/ODE problem kinds (not in the L1–L8 integrate/differentiate ladder llmopt asked for) until Phase C needs them; sympy-general printing.
+
+## Status (2026-07-18 EOD)
+
+All four tasks complete. **The 10⁴ (level, seed) parity gate passes:
+10,000/10,000 byte-exact** against fixtures generated from llmopt's
+authentic problems.py (sympy 1.14, CPython 3.12/3.14 pinned). No
+intentionally-diverged levels. sympy auto-eval rules captured en route
+(each probed, then fixture-locked): trig minus-extraction with sort_key
+tie-break; exp≡E**u (pow folding + term-grouped Mul merging);
+exp(log(u))→u; sqrt/rational-pow positive-coefficient extraction with
+sign kept on the rest; same-base sqrt merging; the two-arg Add print
+special case; and the C++ unspecified-evaluation-order trap (all
+multi-draw expressions explicitly sequenced). Sub-seeding (l6/7/8-sub-
+{float}) verified: std::format("{}", d) is bit-identical to Python repr
+on the pyrand random() stream.
