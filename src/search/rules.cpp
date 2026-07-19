@@ -309,6 +309,8 @@ std::vector<expr> i_parts(const expr& node) {
 
 }  // namespace
 
+void add_tranche2(rule_set& r);  // rules2.cpp
+
 const rule_set& default_rules() {
   static const rule_set rs = [] {
     rule_set r;
@@ -330,6 +332,7 @@ const rule_set& default_rules() {
         {"i_usub", i_usub},
         {"i_parts", i_parts},
     };
+    add_tranche2(r);
     r.algebra.emplace_back(
         "expand", [](const expr& e) -> std::optional<expr> {
           const expr n = sym::expand(e);

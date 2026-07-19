@@ -1,5 +1,8 @@
+# build trees
+build/
+build-rel/
 # llmopt-supplied dumps + generated audit/gate artifacts (see data/README.md)
 data/*
 !data/README.md
-# stray local scratch
+# local scratch
 *.user
