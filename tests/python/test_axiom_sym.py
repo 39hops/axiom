@@ -68,5 +68,33 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
 check("8-thread hammer, 200 tasks, all EQUIVALENT",
       all(r == "EQUIVALENT" for r in results))
 
+# ---- solver bindings (hybrid slots contract)
+
+r = ax.solve(ax.parse_sstr("Integral(3*sin(x) + x**2, x)"))
+check("native solve", r["solved"])
+
+calls = []
+def _fake_heurisch(node_sstr):
+    calls.append(node_sstr)
+    return ["x/2 - sin(x)*cos(x)/2"] if "sin(x)**2" in node_sstr else []
+r = ax.solve(ax.parse_sstr("Integral(sin(x)**2, x)"), budget=100,
+             heurisch=_fake_heurisch)
+check("heurisch slot invoked + solved", r["solved"] and len(calls) >= 1)
+
+def _lying(node_sstr):
+    return ["x**3"]
+r = ax.solve(ax.parse_sstr("Integral(sin(x)**2, x)"), budget=100,
+             heurisch=_lying)
+ok = True
+if r["solved"]:
+    ok = ax.equivalent_mod_const(ax.parse_sstr(r["answer"]),
+                                 ax.parse_sstr("sin(x)**2"), "x") == "EQUIVALENT"
+check("lying slot never corrupts the answer", ok)
+
+def _crashing(node_sstr):
+    raise RuntimeError("boom")
+r = ax.solve(ax.parse_sstr("Integral(x**2, x)"), heurisch=_crashing)
+check("crashing slot survives conservatively", r["solved"])
+
 print(f"\n{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)
