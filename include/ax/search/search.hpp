@@ -79,6 +79,9 @@ const rule_set& default_rules();
 
 // ------------------------------------------------------------- verification
 
+/** Back-substitute solved Subs carriers (the subs_eval algebra move). */
+expr subs_eval_pass(const expr& e);
+
 /** Resolve Derivative carriers natively (repeated diff per limit) and
     solved Subs carriers; Integrals stay unevaluated — the exact analogue
     of sympy doit(integrals=False). */

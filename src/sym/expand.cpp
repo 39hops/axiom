@@ -1,5 +1,7 @@
 #include <ax/sym/expand.hpp>
 
+#include <vector>
+
 #include <string>
 
 namespace ax::sym {
@@ -39,7 +41,13 @@ expr expand(const expr& e) {
     case kind::sym:
       return e;
     case kind::fn:
-      return expr::fn(e.name(), expand(e.args()[0]));
+      {
+        // n-ary fn nodes (search carriers): expand every argument
+        std::vector<expr> mapped;
+        mapped.reserve(e.args().size());
+        for (const expr& a : e.args()) mapped.push_back(expand(a));
+        return expr::fn(e.name(), std::move(mapped));
+      }
     case kind::add: {
       expr sum = expr::num(0);
       for (const expr& t : e.args()) sum = sum + expand(t);

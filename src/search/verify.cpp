@@ -32,6 +32,18 @@ void free_symbols(const expr& e, std::set<std::string>& out) {
     if (n != "pi" && n != "E") out.insert(n);
     return;
   }
+  // Subs binds its variable (sympy semantics); indefinite Integral and
+  // Derivative do NOT — Integral(f, x).free_symbols contains x because
+  // the antiderivative depends on it. Binding it here made every pure
+  // integral edge free-symbol-empty and rejected (measured: L1 60->1).
+  if (e.is_fn() && e.name() == "Subs") {
+    std::set<std::string> inner;
+    free_symbols(e.args()[0], inner);
+    if (e.args()[1].is_sym()) inner.erase(e.args()[1].name());
+    out.insert(inner.begin(), inner.end());
+    free_symbols(e.args()[2], out);
+    return;
+  }
   for (const expr& a : e.args()) free_symbols(a, out);
 }
 

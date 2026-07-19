@@ -39,6 +39,7 @@ add_library(axiom STATIC
   src/search/verify.cpp
   src/search/successors.cpp
   src/search/beam.cpp
+  src/search/rules.cpp
   src/pyrand/sha512.cpp
   src/pyrand/pyrand.cpp
   src/mathgen/problems.cpp
@@ -51,6 +52,9 @@ endif()
 
 add_executable(axiom-oracle tools/oracle_main.cpp)
 target_link_libraries(axiom-oracle PRIVATE axiom)
+
+add_executable(axiom-qual-gate tools/qual_gate_main.cpp)
+target_link_libraries(axiom-qual-gate PRIVATE axiom)
 
 # Optional Python bridge (llmopt shadow-mode consumer). Off by default so
 # the STL-only core stays dependency-free; pybind11 is bridge-only, like

@@ -10,8 +10,6 @@ namespace ax::search {
 
 namespace {
 
-expr doit_subs_only(const expr& e);
-
 struct expr_key_hash {
   std::size_t operator()(const expr& e) const { return e.hash(); }
 };
@@ -19,14 +17,10 @@ struct expr_key_eq {
   bool operator()(const expr& a, const expr& b) const { return a.same(b); }
 };
 
-/** subs_eval algebra move: back-substitute solved Subs carriers. */
-std::optional<expr> subs_eval(const expr& e) {
-  const expr next = doit_subs_only(e);
-  if (next.same(e)) return std::nullopt;
-  return next;
-}
+}  // namespace
 
-expr doit_subs_only(const expr& e) {
+/** Back-substitute solved Subs carriers (the subs_eval move body). */
+expr subs_eval_pass(const expr& e) {
   switch (e.k()) {
     case sym::kind::num:
     case sym::kind::sym:
@@ -36,40 +30,23 @@ expr doit_subs_only(const expr& e) {
         return e.args()[0].subs(e.args()[1], e.args()[2]);
       std::vector<expr> mapped;
       mapped.reserve(e.args().size());
-      for (const expr& a : e.args()) mapped.push_back(doit_subs_only(a));
+      for (const expr& a : e.args()) mapped.push_back(subs_eval_pass(a));
       return expr::fn(e.name(), std::move(mapped));
     }
     case sym::kind::add: {
       expr out = expr::num(0);
-      for (const expr& t : e.args()) out = out + doit_subs_only(t);
+      for (const expr& t : e.args()) out = out + subs_eval_pass(t);
       return out;
     }
     case sym::kind::mul: {
       expr out = expr::num(1);
-      for (const expr& f : e.args()) out = out * doit_subs_only(f);
+      for (const expr& f : e.args()) out = out * subs_eval_pass(f);
       return out;
     }
     case sym::kind::pow:
-      return doit_subs_only(e.args()[0]).pow(doit_subs_only(e.args()[1]));
+      return subs_eval_pass(e.args()[0]).pow(subs_eval_pass(e.args()[1]));
   }
   return e;
-}
-
-}  // namespace
-
-const rule_set& default_rules() {
-  static const rule_set rs = [] {
-    rule_set r;
-    // Starter algebra moves; rule tranches C3-C5 fill core/macros/integral.
-    r.algebra.emplace_back("expand", [](const expr& e) -> std::optional<expr> {
-      const expr n = sym::expand(e);
-      if (n.same(e)) return std::nullopt;
-      return n;
-    });
-    r.algebra.emplace_back("subs_eval", subs_eval);
-    return r;
-  }();
-  return rs;
 }
 
 bool replay_verify(const expr& root, const std::vector<std::string>& history,

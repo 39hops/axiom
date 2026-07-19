@@ -80,7 +80,15 @@ expr diff(const expr& e, const expr& s) {
     mapped[0] = diff(a[0], s);
     return expr::fn("Integral", std::move(mapped));
   }
-  if (e.is_fn() && (e.name() == "Derivative" || e.name() == "Subs")) {
+  if (e.is_fn() && e.name() == "Subs") {
+    // chain rule through the carrier: d/dx Subs(F, u, g) =
+    // Subs(dF/du, u, g) * dg/dx — the inner dF/du peels Integrals, so a
+    // u-sub edge's derivative resolves without integrating anything
+    const expr inner = diff(e.args()[0], e.args()[1]);
+    return expr::subs_carrier(inner, e.args()[1], e.args()[2]) *
+           diff(e.args()[2], s);
+  }
+  if (e.is_fn() && e.name() == "Derivative") {
     // stays symbolic: append a derivative wrapper (resolved by doit
     // upstream, never differentiated through here)
     return expr::derivative(e, s);

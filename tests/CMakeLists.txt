@@ -52,6 +52,7 @@ add_executable(ax_tests
   pyrand/pyrand_test.cpp
   mathgen/expression_test.cpp
   search/chassis_test.cpp
+  search/rules_test.cpp
 )
 target_compile_definitions(ax_tests PRIVATE
   AX_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

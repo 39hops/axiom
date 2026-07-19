@@ -5,6 +5,7 @@
 #include <ax/sym/poly.hpp>
 
 #include <array>
+#include <vector>
 #include <cmath>
 #include <cstdlib>
 #include <map>
@@ -66,14 +67,19 @@ ratio as_ratio(const expr& e, const expr& x) {
     case kind::sym:
       return {e, expr::num(1)};
     case kind::fn: {
-      const expr arg = canonical(e.args()[0], x);
       // sqrt(u) -> u^(1/2): lets expr's pow merging do the algebra
       // (sqrt(u)*sqrt(u) -> u, sqrt(u)/u -> u^(-1/2), ...). Sound because
       // sqrt defined implies u >= 0.
       if (e.name() == "sqrt")
-        return {arg.pow(expr::num(rational(bigint(1), bigint(2)))),
+        return {canonical(e.args()[0], x)
+                    .pow(expr::num(rational(bigint(1), bigint(2)))),
                 expr::num(1)};
-      return {expr::fn(e.name(), arg), expr::num(1)};
+      // rebuild ALL args (carriers are n-ary; rebuilding unary silently
+      // truncated Subs to one arg -> span assertion downstream)
+      std::vector<expr> mapped;
+      mapped.reserve(e.args().size());
+      for (const expr& a : e.args()) mapped.push_back(canonical(a, x));
+      return {expr::fn(e.name(), std::move(mapped)), expr::num(1)};
     }
     case kind::pow:
       return ratio_pow(e.args()[0], e.args()[1], x);
@@ -179,7 +185,42 @@ expr canonical(const expr& e, const expr& x) {
   expr den = expand(r.den);
   if (num.is_num() && num.value() == kZero) return expr::num(0);
   if (den.is_num()) return num / den;
-  poly_reduce(num, den, x);
+  if (!poly_reduce(num, den, x)) {
+    // opaque factors (fn nodes, radicals) block whole-expression poly
+    // reduction; cancel the polynomial PART of the numerator against the
+    // denominator instead: num = P(x)*rest -> gcd-reduce P/den.
+    expr pprod = expr::num(1);
+    expr opaque = expr::num(1);
+    if (num.is_mul()) {
+      for (const expr& f : num.args()) {
+        bool is_poly = true;
+        try {
+          (void)poly::from_expr(f, x);
+        } catch (const std::exception&) {
+          is_poly = false;
+        }
+        if (is_poly)
+          pprod = pprod * f;
+        else
+          opaque = opaque * f;
+      }
+      if (!(opaque.is_num() && opaque.value() == kOne)) {
+        expr pn = expand(pprod);
+        expr pd = den;
+        if (poly_reduce(pn, pd, x)) {
+          num = pn * opaque;
+          den = pd;
+        }
+      }
+    }
+  }
+  // divide factor-wise so shared factors cancel via pow merging
+  // (num/mul{a,b} as pow(mul,-1) would block a*x/(2*x)-style cancels)
+  if (den.is_mul()) {
+    expr out = num;
+    for (const expr& f : den.args()) out = out / f;
+    return out;
+  }
   return num / den;
 }
 
