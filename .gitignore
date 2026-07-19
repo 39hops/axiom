@@ -6,3 +6,7 @@ data/*
 !data/README.md
 # local scratch
 *.user
+# repro/debug scratch
+*.jsonl
+!tests/**/*.jsonl
+o.err

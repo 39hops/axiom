@@ -1,2 +1,0 @@
-== per-level (budget 800, wall 1077.03s):
-  L6: 6/60
