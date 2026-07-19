@@ -65,6 +65,26 @@ expr diff(const expr& e, const expr& s) {
     // general: u^v (dv log u + v du / u)
     return e * (dv * expr::fn("log", u) + v * du / u);
   }
+  // Unevaluated carriers (Phase C search states):
+  if (e.is_fn() && e.name() == "Integral") {
+    // d/dx Integral(f, ..., x) = drop the outermost (last) limit; this is
+    // the verify identity that never asks anyone to integrate.
+    const auto a = e.args();
+    if (a.back().same(s)) {
+      if (a.size() == 2) return a[0];
+      return expr::fn("Integral",
+                      std::vector<expr>(a.begin(), a.end() - 1));
+    }
+    // independent variable: differentiate under the integral sign
+    std::vector<expr> mapped(a.begin(), a.end());
+    mapped[0] = diff(a[0], s);
+    return expr::fn("Integral", std::move(mapped));
+  }
+  if (e.is_fn() && (e.name() == "Derivative" || e.name() == "Subs")) {
+    // stays symbolic: append a derivative wrapper (resolved by doit
+    // upstream, never differentiated through here)
+    return expr::derivative(e, s);
+  }
   // fn: chain rule
   const expr& u = e.args()[0];
   return fn_outer_derivative(e.name(), u) * diff(u, s);

@@ -35,6 +35,7 @@ add_library(axiom STATIC
   src/sym/jsonl.cpp
   src/sym/harness.cpp
   src/sym/print_sstr.cpp
+  src/sym/count_ops.cpp
   src/pyrand/sha512.cpp
   src/pyrand/pyrand.cpp
   src/mathgen/problems.cpp

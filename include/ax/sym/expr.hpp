@@ -29,6 +29,13 @@ class expr {
   static expr symbol(std::string name);
   /** Named unary function: sin, cos, tan, exp, log, sqrt (extensible). */
   static expr fn(std::string name, expr arg);
+  /** N-ary named node. Used for the unevaluated search carriers:
+      Integral(f, x[, x...]), Derivative(f, x[, x...]), Subs(e, x, r).
+      Carriers are opaque to canonicalization and throw on eval. */
+  static expr fn(std::string name, std::vector<expr> args);
+  static expr integral(expr f, expr x);
+  static expr derivative(expr f, expr x);
+  static expr subs_carrier(expr e, expr x, expr r);
 
   // ---- observers
   kind k() const;

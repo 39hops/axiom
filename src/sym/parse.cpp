@@ -3,6 +3,7 @@
 #include <array>
 #include <cctype>
 #include <string>
+#include <vector>
 #include <string_view>
 
 namespace ax::sym {
@@ -11,6 +12,15 @@ namespace {
 
 constexpr std::array<std::string_view, 9> kKnownFns = {
     "sin", "cos", "tan", "exp", "log", "sqrt", "atan", "asin", "acos"};
+
+/** Search carriers: name -> {min_args, max_args}. */
+struct carrier_spec {
+  std::string_view name;
+  std::size_t min_args;
+  std::size_t max_args;
+};
+constexpr std::array<carrier_spec, 3> kCarriers = {{
+    {"Integral", 2, 8}, {"Derivative", 2, 8}, {"Subs", 3, 3}}};
 
 constexpr std::array<std::string_view, 4> kRejectedAtoms = {"oo", "zoo",
                                                            "nan", "I"};
@@ -159,14 +169,29 @@ class parser {
     const std::string name(s_.substr(start, i_ - start));
     skip_ws();
     if (eat('(')) {
-      if (!contains(kKnownFns, name)) {
+      const carrier_spec* carrier = nullptr;
+      for (const auto& c : kCarriers)
+        if (c.name == name) carrier = &c;
+      if (!carrier && !contains(kKnownFns, name)) {
         i_ = start;
         fail("unknown function '" + name + "'");
       }
-      expr arg = sum();
+      std::vector<expr> fargs;
+      fargs.push_back(sum());
       skip_ws();
+      while (eat(',')) {
+        fargs.push_back(sum());
+        skip_ws();
+      }
       if (!eat(')')) fail("expected ')'");
-      return expr::fn(name, arg);
+      if (!carrier) {
+        if (fargs.size() != 1) fail("'" + name + "' takes one argument");
+        return expr::fn(name, fargs[0]);
+      }
+      if (fargs.size() < carrier->min_args ||
+          fargs.size() > carrier->max_args)
+        fail("'" + name + "': wrong number of arguments");
+      return expr::fn(name, std::move(fargs));
     }
     if (contains(kRejectedAtoms, name)) {
       i_ = start;

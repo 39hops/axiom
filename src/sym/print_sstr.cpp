@@ -541,9 +541,17 @@ std::string print(const expr& e) {
       return e.value().to_string();
     case kind::sym:
       return e.name();
-    case kind::fn:
+    case kind::fn: {
       if (is_sqrt(e)) return "sqrt(" + print(e.args()[0]) + ")";
-      return e.name() + "(" + print(e.args()[0]) + ")";
+      std::string out = e.name() + "(";
+      bool first = true;
+      for (const expr& a : e.args()) {
+        if (!first) out += ", ";
+        first = false;
+        out += print(a);
+      }
+      return out + ")";
+    }
     case kind::add:
       return print_add(e);
     case kind::mul:

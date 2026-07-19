@@ -49,8 +49,16 @@ std::string text(const expr& e) {
       return e.value().to_string();
     case kind::sym:
       return e.name();
-    case kind::fn:
-      return e.name() + "(" + text(e.args()[0]) + ")";
+    case kind::fn: {
+      std::string out = e.name() + "(";
+      bool first = true;
+      for (const expr& a : e.args()) {
+        if (!first) out += ", ";
+        first = false;
+        out += text(a);
+      }
+      return out + ")";
+    }
     case kind::add: {
       std::string out;
       bool first = true;

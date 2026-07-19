@@ -266,6 +266,20 @@ expr expr::symbol(std::string name) {
 expr expr::fn(std::string name, expr arg) {
   return pool::intern(node{kind::fn, {}, std::move(name), {std::move(arg)}, 0});
 }
+expr expr::fn(std::string name, std::vector<expr> args) {
+  return pool::intern(
+      node{kind::fn, {}, std::move(name), std::move(args), 0});
+}
+expr expr::integral(expr f, expr x) {
+  return fn("Integral", std::vector<expr>{std::move(f), std::move(x)});
+}
+expr expr::derivative(expr f, expr x) {
+  return fn("Derivative", std::vector<expr>{std::move(f), std::move(x)});
+}
+expr expr::subs_carrier(expr e, expr x, expr r) {
+  return fn("Subs",
+            std::vector<expr>{std::move(e), std::move(x), std::move(r)});
+}
 
 kind expr::k() const { return p_->k; }
 const rational& expr::value() const {
@@ -293,7 +307,11 @@ int expr::compare(const expr& a, const expr& b) {
       return x.nm.compare(y.nm);
     case kind::fn: {
       if (const int c = x.nm.compare(y.nm)) return c;
-      return compare(x.a[0], y.a[0]);
+      const std::size_t n = std::min(x.a.size(), y.a.size());
+      for (std::size_t i = 0; i < n; ++i)
+        if (const int c = compare(x.a[i], y.a[i])) return c;
+      if (x.a.size() != y.a.size()) return x.a.size() < y.a.size() ? -1 : 1;
+      return 0;
     }
     default: {  // add, mul, pow: lexicographic on operands
       const std::size_t n = std::min(x.a.size(), y.a.size());
@@ -338,8 +356,12 @@ expr expr::subs(const expr& sym, const expr& replacement) const {
     case kind::pow:
       return make_pow(n.a[0].subs(sym, replacement),
                       n.a[1].subs(sym, replacement));
-    case kind::fn:
-      return fn(n.nm, n.a[0].subs(sym, replacement));
+    case kind::fn: {
+      std::vector<expr> mapped;
+      mapped.reserve(n.a.size());
+      for (const expr& arg : n.a) mapped.push_back(arg.subs(sym, replacement));
+      return fn(n.nm, std::move(mapped));
+    }
   }
   throw std::logic_error("expr::subs: unreachable");
 }
@@ -402,8 +424,12 @@ expr simplify(const expr& e) {
     }
     case kind::pow:
       return make_pow(simplify(n.a[0]), simplify(n.a[1]));
-    case kind::fn:
-      return expr::fn(n.nm, simplify(n.a[0]));
+    case kind::fn: {
+      std::vector<expr> mapped;
+      mapped.reserve(n.a.size());
+      for (const expr& arg : n.a) mapped.push_back(simplify(arg));
+      return expr::fn(n.nm, std::move(mapped));
+    }
   }
   throw std::logic_error("simplify: unreachable");
 }
