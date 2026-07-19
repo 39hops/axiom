@@ -3,7 +3,8 @@
 Provenance: run against CPython (>=3.3 semantics: seed version 2 for
 strings, _randbelow via getrandbits rejection sampling, shuffle via
 reversed Fisher-Yates). Regenerating on any conforming CPython must be
-a no-op diff.
+a no-op diff. Cross-generated bit-exact on CPython 3.12.13 (llmopt WSL
+farm) and 3.14.4 (axiom dev) on 2026-07-18 — both versions pinned.
 
 Format (TSV, one stream per line): seed<TAB>stream<TAB>v1 v2 v3 ...
 floats as repr() (shortest round-trip). Output:
