@@ -34,6 +34,7 @@ add_library(axiom STATIC
   src/sym/oracle.cpp
   src/sym/jsonl.cpp
   src/sym/harness.cpp
+  src/sym/print_sstr.cpp
   src/pyrand/sha512.cpp
   src/pyrand/pyrand.cpp
 )

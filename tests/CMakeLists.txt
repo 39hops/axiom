@@ -47,6 +47,7 @@ add_executable(ax_tests
   sym/parse_test.cpp
   sym/oracle_test.cpp
   sym/jsonl_test.cpp
+  sym/print_sstr_test.cpp
   pyrand/pyrand_test.cpp
 )
 target_compile_definitions(ax_tests PRIVATE
