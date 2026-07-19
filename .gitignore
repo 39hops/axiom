@@ -1,15 +1,5 @@
-axiom_parity_*.jsonl
-axiom_verdicts.jsonl
-axiom_qual_roots.jsonl
-markov_prior.tsv
-qual*.tsv
-qual*_summary.txt
-stage2_*.jsonl
-parity_*.jsonl
-*.tsv
-!tests/**/*.tsv
-one_root.jsonl
-roots3.jsonl
-sub*.jsonl
-l3.jsonl
-q2.tsv
+# llmopt-supplied dumps + generated audit/gate artifacts (see data/README.md)
+data/*
+!data/README.md
+# stray local scratch
+*.user

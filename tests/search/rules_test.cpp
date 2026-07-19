@@ -61,7 +61,7 @@ TEST(RulesT1, QualRootsSmokeSlice) {
   // roots (official parity reference comes from llmopt's sympy run).
   // Every emitted chain must be oracle-valid: diff-back equivalence +
   // full replay under verify_p=1.
-  std::ifstream in(std::string(AX_SOURCE_DIR) + "/axiom_qual_roots.jsonl");
+  std::ifstream in(std::string(AX_SOURCE_DIR) + "/data/llmopt/axiom_qual_roots.jsonl");
   if (!in.good()) GTEST_SKIP() << "qual roots not present";
   std::map<int, int> solved, total;
   std::string line;
