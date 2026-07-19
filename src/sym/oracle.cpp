@@ -225,6 +225,64 @@ expr canonical(const expr& e, const expr& x) {
       }
     }
   }
+  // shared-opaque-factor cancellation (the radicand-tax fix): a
+  // non-numeric factor present in EVERY additive term of both numerator
+  // and denominator divides through — e.g.
+  // (a*sqrt(P) + b*sqrt(P)) / (q1*sqrt(P) + q2*sqrt(P)) -> (a+b)/(q1+q2).
+  {
+    const auto factor_list = [](const expr& t) {
+      std::vector<expr> fs;
+      if (t.is_mul())
+        for (const expr& a : t.args()) fs.push_back(a);
+      else
+        fs.push_back(t);
+      return fs;
+    };
+    const auto has_factor = [&](const expr& t, const expr& f) {
+      for (const expr& a : factor_list(t)) {
+        if (a.same(f)) return true;
+        if (a.is_pow() && a.args()[0].same(f) && a.args()[1].is_num() &&
+            kZero < a.args()[1].value())
+          return true;
+      }
+      return false;
+    };
+    const auto terms_of = [](const expr& e2) {
+      std::vector<expr> ts;
+      if (e2.is_add())
+        for (const expr& t : e2.args()) ts.push_back(t);
+      else
+        ts.push_back(e2);
+      return ts;
+    };
+    bool progress = true;
+    while (progress && !den.is_num()) {
+      progress = false;
+      // candidate factors: non-numeric factors of the first num term
+      for (const expr& f : factor_list(terms_of(num).front())) {
+        const expr base =
+            f.is_pow() && f.args()[1].is_num() && kZero < f.args()[1].value()
+                ? f.args()[0]
+                : f;
+        if (base.is_num()) continue;
+        bool all = true;
+        for (const expr& t : terms_of(num)) all = all && has_factor(t, base);
+        for (const expr& t : terms_of(den)) all = all && has_factor(t, base);
+        if (!all) continue;
+        expr new_num = expr::num(0);
+        for (const expr& t : terms_of(num)) new_num = new_num + t / base;
+        expr new_den = expr::num(0);
+        for (const expr& t : terms_of(den)) new_den = new_den + t / base;
+        num = new_num;
+        den = new_den;
+        progress = true;
+        break;
+      }
+    }
+    if (den.is_num()) return num / den;
+    // the cancel may have re-enabled full polynomial reduction
+    poly_reduce(num, den, x);
+  }
   // divide factor-wise so shared factors cancel via pow merging
   // (num/mul{a,b} as pow(mul,-1) would block a*x/(2*x)-style cancels)
   if (den.is_mul()) {

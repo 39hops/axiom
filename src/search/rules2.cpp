@@ -105,6 +105,38 @@ std::optional<expr> integrate_poly(const poly& p, const expr& x) {
   return out;
 }
 
+/** Whole-node substitution of a log atom by a placeholder symbol. */
+expr replace_log(const expr& e, const expr& target, const expr& repl) {
+  if (e.same(target)) return repl;
+  switch (e.k()) {
+    case sym::kind::num:
+    case sym::kind::sym:
+      return e;
+    case sym::kind::fn: {
+      std::vector<expr> mapped;
+      for (const expr& a : e.args())
+        mapped.push_back(replace_log(a, target, repl));
+      return expr::fn(e.name(), std::move(mapped));
+    }
+    case sym::kind::add: {
+      expr out = expr::num(0);
+      for (const expr& t : e.args())
+        out = out + replace_log(t, target, repl);
+      return out;
+    }
+    case sym::kind::mul: {
+      expr out = expr::num(1);
+      for (const expr& f2 : e.args())
+        out = out * replace_log(f2, target, repl);
+      return out;
+    }
+    case sym::kind::pow:
+      return replace_log(e.args()[0], target, repl)
+          .pow(replace_log(e.args()[1], target, repl));
+  }
+  return e;
+}
+
 /** Exact Gaussian elimination for M c = rhs over rationals; free
     variables are set to 0 (sympy solve + subs(c->0) semantics).
     Returns false when inconsistent. */
@@ -463,7 +495,7 @@ std::vector<expr> i_sqrt_basis(const expr& node) {
   const auto un = unpack_i(node);
   if (!un) return {};
   const auto& [f, x] = *un;
-  if (sym::count_ops(f) > 60) return {};  // size pre-gate
+  if (sym::count_ops(f) > 200) return {};  // coarse; budget guards
   // collect sqrt-of-poly radicands (fn sqrt and pow ±1/2 forms)
   std::vector<expr> bases;
   const std::function<void(const expr&)> walk = [&](const expr& e) {
@@ -500,10 +532,120 @@ std::vector<expr> i_sqrt_basis(const expr& node) {
   const expr h_e =
       sym::canonical(f * expr::fn("sqrt", P_e), x);
   poly h;
+  bool h_is_poly = true;
   try {
     h = poly::from_expr(sym::expand(h_e), x);
   } catch (const std::exception&) {
-    return {};  // log-combo branch: not ported in v1 (documented)
+    h_is_poly = false;
+  }
+  if (!h_is_poly) {
+    // sqrt*log combination branch (tranche 4; the L8 autopsy family):
+    // ansatz (A(x) + B(x)*log(q)) * sqrt(P). Clearing the d/dx residual
+    // by 2*sqrt(P)*q leaves a poly identity in (x, u=log(q)) with
+    // deg_u <= 1, which decouples into two rational linear systems:
+    //   u^1:  q*(2B'P + BP')          = h2_1        (solve B)
+    //   u^0:  q*(2A'P + AP') + 2BPq'  = h2_0        (then solve A)
+    std::vector<expr> logs;
+    const std::function<void(const expr&)> wl = [&](const expr& q) {
+      if (q.is_fn() && q.name() == "log" && contains(q.args()[0], x)) {
+        bool dup = false;
+        for (const expr& g : logs) dup = dup || g.same(q);
+        if (!dup) logs.push_back(q);
+      }
+      for (const expr& a2 : q.args()) wl(a2);
+    };
+    wl(f);
+    if (logs.size() != 1) return {};
+    const expr& Lg = logs[0];
+    poly q;
+    try {
+      q = poly::from_expr(sym::expand(Lg.args()[0]), x);
+    } catch (const std::exception&) {
+      return {};
+    }
+    if (q.degree() < 1) return {};
+    const expr u = expr::symbol("ulog_");
+    expr h2_e = expr::num(0);
+    try {
+      h2_e = sym::canonical(
+          f * expr::num(2) * expr::fn("sqrt", P_e) * Lg.args()[0], x);
+    } catch (const std::exception&) {
+      return {};
+    }
+    // split by u-degree: part0 = h2|_{u=0}; part1 = (h2 - part0)|_{u=1}
+    // (fraction_of first: canonical can leave a residual poly
+    // denominator; exact-divide the parts through it)
+    const auto [h2n, h2d] = fraction_of(h2_e, x);
+    const expr h2ph = sym::expand(replace_log(h2n, Lg, u));
+    const expr part0_e = h2ph.subs(u, expr::num(0));
+    const expr part1_e = sym::expand(h2ph - part0_e).subs(u, expr::num(1));
+    poly h0, h1, hden;
+    try {
+      h0 = poly::from_expr(sym::expand(part0_e), x);
+      h1 = poly::from_expr(sym::expand(part1_e), x);
+      hden = poly::from_expr(sym::expand(h2d), x);
+    } catch (const std::exception&) {
+      return {};  // deg_u > 1, non-poly residue, or radical denominator
+    }
+    if (hden.degree() >= 0 && !(hden.degree() == 0 &&
+                                hden.coeff(0) == kOneR)) {
+      auto [q0, r0] = h0.divmod(hden);
+      auto [q1, r1] = h1.divmod(hden);
+      if (r0.degree() >= 0 || r1.degree() >= 0) return {};
+      h0 = q0;
+      h1 = q1;
+    }
+    const int hdeg = std::max(h0.degree(), h1.degree());
+    const int degA = std::max(hdeg - P.degree() + 1, 0) + 1;
+    if (degA > 8) return {};
+    const poly Pp = P.derivative();
+    const poly qp = q.derivative();
+    const std::size_t nrows = static_cast<std::size_t>(
+        std::max({h0.degree(), h1.degree(),
+                  degA + P.degree() + q.degree()}) + 2);
+    // shared column shape: col_j = q*(2*(x^j)'*P + x^j*P')
+    const auto make_cols = [&] {
+      std::vector<std::vector<ax::rational>> m(
+          nrows, std::vector<ax::rational>(
+                     static_cast<std::size_t>(degA) + 1, kZero));
+      for (int j = 0; j <= degA; ++j) {
+        poly col = x_power(static_cast<std::size_t>(j)) * Pp;
+        if (j > 0)
+          col = col + poly_scale(
+                          x_power(static_cast<std::size_t>(j - 1)) * P,
+                          ax::rational(ax::bigint(2 * j)));
+        col = col * q;
+        const auto v = coeff_vector(col, nrows);
+        for (std::size_t i = 0; i < nrows; ++i)
+          m[i][static_cast<std::size_t>(j)] = v[i];
+      }
+      return m;
+    };
+    // u^1: solve B
+    std::vector<ax::rational> solB;
+    if (!solve_rational_linear(make_cols(), coeff_vector(h1, nrows), solB))
+      return {};
+    poly B{std::vector<ax::rational>(solB)};
+    // u^0: rhs = h0 - 2*B*P*q'; solve A
+    const poly corr = poly_scale(B * P * qp, ax::rational(ax::bigint(2)));
+    const poly rhs0 = h0 + poly_scale(corr, ax::rational(ax::bigint(-1)));
+    std::vector<ax::rational> solA;
+    if (!solve_rational_linear(make_cols(), coeff_vector(rhs0, nrows), solA))
+      return {};
+    poly A{std::vector<ax::rational>(solA)};
+    expr a_e = expr::num(0);
+    for (int k2 = 0; k2 <= A.degree(); ++k2) {
+      const auto& c = A.coeff(static_cast<std::size_t>(k2));
+      if (!(c == kZero)) a_e = a_e + expr::num(c) * x.pow(expr::num(k2));
+    }
+    expr b_e = expr::num(0);
+    for (int k2 = 0; k2 <= B.degree(); ++k2) {
+      const auto& c = B.coeff(static_cast<std::size_t>(k2));
+      if (!(c == kZero)) b_e = b_e + expr::num(c) * x.pow(expr::num(k2));
+    }
+    const expr ans = (a_e + b_e * Lg) * expr::fn("sqrt", P_e);
+    if (ans.is_num() && ans.value() == kZero) return {};
+    return {ans};
   }
   const int degA = std::max(h.degree() - P.degree() + 1, 0) + 1;
   if (degA > 8) return {};

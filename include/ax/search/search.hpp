@@ -59,7 +59,12 @@ using algebra_move = std::pair<std::string, algebra_fn>;
     UNDECIDED-equivalence decider for the hybrid config. All optional;
     absence costs coverage, never soundness. */
 struct external_slots {
-  std::vector<rule> int_rules;  // e.g. i_heurisch over the bridge
+  /** Bridge-served Integral rules. Convention with llmopt: the sympy
+      leaf-closer registers here under the name "i_heurisch" (op-capped,
+      timeboxed, diff-verified Python-side); the C++ engine treats it as
+      any other rule — fires memoized, children verified, absence = pure
+      native. */
+  std::vector<rule> int_rules;
   std::vector<algebra_move> algebra;  // e.g. factor/trigsimp
   /** Decide an UNDECIDED edge: return true iff externally verified
       equivalent. Absent -> UNDECIDED rejects. */

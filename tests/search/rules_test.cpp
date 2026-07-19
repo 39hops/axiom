@@ -97,6 +97,28 @@ TEST(RulesT1, QualRootsSmokeSlice) {
   EXPECT_GE(solved[2], 7);
 }
 
+TEST(RulesT4, SqrtLogComboBranch) {
+  // fixture-gated the honest way: take F = sqrt(P)*log(q), differentiate
+  // natively, and require i_sqrt_basis to reconstruct an antiderivative
+  // the oracle certifies (equality mod constant). No copied constants.
+  const expr P = parse("x**2 + 1");
+  const expr q = parse("2*x + 3");
+  const expr F = expr::fn("sqrt", P) * expr::fn("log", q);
+  const expr f = ax::sym::diff(F, x);
+  const auto& rs = default_rules();
+  ax::search::rule_fn sqrt_basis;
+  for (const auto& [name, fn] : rs.integral)
+    if (name == "i_sqrt_basis") sqrt_basis = fn;
+  ASSERT_TRUE(static_cast<bool>(sqrt_basis));
+  const auto cands = sqrt_basis(expr::integral(f, x));
+  bool certified = false;
+  for (const expr& c : cands)
+    certified = certified ||
+                ax::sym::equivalent_mod_const(c, f, x) ==
+                    ax::sym::verdict::equivalent;
+  EXPECT_TRUE(certified) << cands.size() << " candidates, none certified";
+}
+
 TEST(RulesT3, PathologyRootsBoundedUnderDeadline) {
   // llmopt-style pathology collection: roots that once wedged the gate.
   // Contract: with a short deadline the search RETURNS (solved or not)

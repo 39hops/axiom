@@ -153,7 +153,7 @@ std::vector<expr> i_unprod(const expr& node) {
   if (!un) return {};
   const auto& [f, x] = *un;
   if (!f.is_add()) return {};
-  if (sym::count_ops(f) > 80) return {};  // size pre-gate
+  if (sym::count_ops(f) > 200) return {};  // coarse gate; work budget is the guarantee
   std::vector<expr> out;
   std::vector<expr> seen;
   const auto emit = [&](const expr& A) -> bool {
@@ -220,7 +220,7 @@ std::vector<expr> i_ansatz_exp(const expr& node) {
   const auto un = unpack_i(node);
   if (!un) return {};
   const auto& [f0, x] = *un;
-  if (sym::count_ops(f0) > 80) return {};  // size pre-gate
+  if (sym::count_ops(f0) > 200) return {};  // coarse gate; work budget is the guarantee
   const expr f = sym::expand(f0);
   // group terms by their exp-product signature
   struct group {
@@ -329,10 +329,10 @@ std::vector<expr> i_linear_basis(const expr& node) {
   const auto un = unpack_i(node);
   if (!un) return {};
   const auto& [f0, x] = *un;
-  // size pre-gate (llmopt hardness-gating): the ansatz cost explodes
-  // with input size; refuse before paying anything (time-checks bound
-  // damage, size-gates avoid paying it)
-  if (sym::count_ops(f0) > 60) return {};
+  // coarse size gate only: the cooperative work budget is the real
+  // guarantee now (llmopt attribution: the old 60-op gate was clipping
+  // linear_basis solves on exactly the L7/L8 states it serves)
+  if (sym::count_ops(f0) > 200) return {};
   expr f = sym::expand(f0);
   // Laurent tail: c*x^-n split off analytically
   expr laurent = expr::num(0);
