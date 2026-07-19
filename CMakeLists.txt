@@ -42,6 +42,7 @@ add_library(axiom STATIC
   src/search/rules.cpp
   src/search/rules2.cpp
   src/search/rules3.cpp
+  src/search/engine.cpp
   src/pyrand/sha512.cpp
   src/pyrand/pyrand.cpp
   src/mathgen/problems.cpp

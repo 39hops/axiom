@@ -16,6 +16,7 @@
 
 #include <chrono>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -159,5 +160,29 @@ bool replay_verify(
 
 search_result beam_search(const expr& root, const rule_set& rules,
                           const beam_options& opt = {});
+
+// ----------------------------------------------------------------- engine
+
+/** Rule-bigram prior (llmopt's zero-NN 316/360 brain). Loaded from the
+    TSV export (U	name	count / B	prev	next	count rows). */
+struct markov_prior {
+  std::map<std::string, long long> unigram;
+  std::map<std::string, std::map<std::string, long long>> bigram;
+
+  static markov_prior load_tsv(const std::string& path);
+  double median_unigram() const;
+  /** Children reranker: bigram[prev][rule] + 0.01*unigram[rule];
+      unseen rules get 0.5*median trial mass (the measured rule). */
+  std::function<std::vector<std::pair<std::string, state>>(
+      const state&, std::vector<std::pair<std::string, state>>)>
+  proposer() const;
+};
+
+/** The measured-best native configuration: markov3 @ width 3, 24 plies,
+    macros on, verify_p = 1. */
+search_result solve(
+    const expr& root, const rule_set& rules, const markov_prior& prior,
+    long long budget = 200,
+    std::optional<std::chrono::steady_clock::time_point> deadline = {});
 
 }  // namespace ax::search
