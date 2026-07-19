@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
     return 2;
   }
   const sym::expr x = sym::expr::symbol("x");
-  std::map<int, int> solved, total;
+  std::map<int, int> solved, edge_certified, total;
   std::string line;
   double wall_total = 0.0;
   while (std::getline(in, line)) {
@@ -63,8 +63,11 @@ int main(int argc, char** argv) {
         ok = false;
         why = "DIFFBACK-NOTEQ";  // a real soundness bug if it ever fires
       } else if (v == sym::verdict::undecided) {
+        // solved, edges certified in-search; whole-chain certificate
+        // UNDECIDED (kept as a separate ledger column, never folded in)
         ok = false;
-        why = "DIFFBACK-UNDECIDED";  // oracle incompleteness, not unsound
+        why = "DIFFBACK-UNDECIDED";
+        ++edge_certified[level];
       } else if (!search::replay_verify(root, res.best.history,
                                         search::default_rules())) {
         ok = false;
