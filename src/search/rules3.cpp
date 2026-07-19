@@ -515,23 +515,29 @@ std::vector<expr> i_linear_basis(const expr& node) {
       e = replace_atom(e, gens[i], ph[i]);
     return e;
   };
-  // size the ansatz: x-degree of the cleared integrand
+  // size the ansatz: TRUE x-degree of the cleared integrand — per-term
+  // exponent summation (the old max-of-any-atom scan undersized the
+  // basis on x^a*x^b product terms; an undersized basis makes the
+  // system inconsistent and the rule silently returns empty — measured
+  // as L7's flat 28 with atan*log = 17/21 of the missing orbitals)
   int deg = 1;
   {
     const expr pf = sym::expand(placehold(
         sym::canonical(f * clear, x)));
-    const std::function<void(const expr&, int)> xdeg = [&](const expr& q,
-                                                           int acc) {
-      if (q.same(x)) deg = std::max(deg, acc + 1);
-      if (q.is_pow() && q.args()[0].same(x) && q.args()[1].is_num() &&
-          q.args()[1].value().den() == ax::bigint(1) &&
-          kZero < q.args()[1].value()) {
-        const std::string ks = q.args()[1].value().num().to_string();
-        if (ks.size() <= 1) deg = std::max(deg, acc + std::stoi(ks));
+    for (const expr& t : terms_of(pf)) {
+      int td = 0;
+      for (const expr& fac : factors_of(t)) {
+        if (fac.same(x)) td += 1;
+        else if (fac.is_pow() && fac.args()[0].same(x) &&
+                 fac.args()[1].is_num() &&
+                 fac.args()[1].value().den() == ax::bigint(1) &&
+                 kZero < fac.args()[1].value()) {
+          const std::string ks = fac.args()[1].value().num().to_string();
+          if (ks.size() <= 2) td += std::stoi(ks);
+        }
       }
-      for (const expr& a2 : q.args()) xdeg(a2, acc);
-    };
-    xdeg(pf, 0);
+      deg = std::max(deg, td);
+    }
   }
   const std::size_t nc = static_cast<std::size_t>(deg + 2) * mons.size();
   if (deg > 8 || nc > 200) return {};

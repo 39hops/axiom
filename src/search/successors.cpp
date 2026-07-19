@@ -154,7 +154,7 @@ std::vector<std::pair<std::string, state>> successors(
       std::vector<expr> rewrites;
       const auto t0 = std::chrono::steady_clock::now();
       try {
-        sym::work_budget_scope budget(std::chrono::milliseconds(2000));
+        sym::work_budget_scope budget(std::chrono::milliseconds(8000));
         rewrites = r.second(node);
       } catch (const std::exception&) {
         // a crashing or budget-expired rule costs one move, never the

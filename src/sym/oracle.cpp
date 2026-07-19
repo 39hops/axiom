@@ -283,6 +283,68 @@ expr canonical(const expr& e, const expr& x) {
     // the cancel may have re-enabled full polynomial reduction
     poly_reduce(num, den, x);
   }
+  // per-opaque-group exact division (sympy cancel on mixed-opaque
+  // sums): group the expanded numerator's terms by their opaque
+  // monomial, and when every group's polynomial coefficient divides the
+  // poly denominator exactly, replace the fraction by the quotient sum
+  // — (p1(x)*atan + p2(x)*log)/q(x) with q | p1, q | p2. Without this,
+  // ansatz rules see phantom 1/q monomials and their linear systems go
+  // inconsistent (the L7 atan*log root cause).
+  if (num.is_add()) {
+    poly pd_g;
+    bool den_poly = true;
+    try {
+      pd_g = poly::from_expr(expand(den), x);
+    } catch (const std::exception&) {
+      den_poly = false;
+    }
+    if (den_poly && pd_g.degree() >= 1) {
+      std::vector<std::pair<expr, expr>> groups;  // opaque -> poly sum
+      bool shape_ok = true;
+      for (const expr& t : num.args()) {
+        expr pprod = expr::num(1);
+        expr opaque = expr::num(1);
+        const auto push = [&](const expr& f) {
+          try {
+            (void)poly::from_expr(expand(f), x);
+            pprod = pprod * f;
+          } catch (const std::exception&) {
+            opaque = opaque * f;
+          }
+        };
+        if (t.is_mul())
+          for (const expr& f : t.args()) push(f);
+        else
+          push(t);
+        bool found = false;
+        for (auto& [op, ps] : groups)
+          if (op.same(opaque)) {
+            ps = ps + pprod;
+            found = true;
+          }
+        if (!found) groups.emplace_back(opaque, pprod);
+        (void)shape_ok;
+      }
+      expr new_num = expr::num(0);
+      bool all_divide = !groups.empty();
+      for (const auto& [op, ps] : groups) {
+        poly pg;
+        try {
+          pg = poly::from_expr(expand(ps), x);
+        } catch (const std::exception&) {
+          all_divide = false;
+          break;
+        }
+        auto [q, r] = pg.divmod(pd_g);
+        if (r.degree() >= 0) {
+          all_divide = false;
+          break;
+        }
+        new_num = new_num + q.to_expr(x) * op;
+      }
+      if (all_divide) return new_num;
+    }
+  }
   // divide factor-wise so shared factors cancel via pow merging
   // (num/mul{a,b} as pow(mul,-1) would block a*x/(2*x)-style cancels)
   if (den.is_mul()) {
