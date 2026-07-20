@@ -15,6 +15,8 @@ namespace {
 using ax::sym::canonical;
 using ax::sym::diff;
 using ax::sym::equivalent;
+using ax::sym::check_ic;
+using ax::sym::check_odesol;
 using ax::sym::equivalent_mod_const;
 using ax::sym::expr;
 using ax::sym::parse;
@@ -180,3 +182,63 @@ TEST(CanonicalSqrt, StillHonestOnDifferentRadicands) {
 }
 
 }  // namespace
+
+// ------------------------------------------------------ L9: check_odesol
+
+TEST(OdeSol, FirstOrderLinear) {
+  // y' + 3y = e^{2x}; y = e^{2x}/5 + C1*e^{-3x} solves it for ALL C1
+  // (C1 stays symbolic: parameter_env binds it at sample points).
+  const expr eq = parse("Eq(Derivative(y(x), x) + 3*y(x), exp(2*x))");
+  const expr sol = parse("exp(2*x)/5 + C1*exp(-3*x)");
+  EXPECT_EQ(check_odesol(eq, sol, x), verdict::equivalent);
+  // wrong coefficient: must be caught, not UNDECIDED
+  const expr bad = parse("exp(2*x)/4 + C1*exp(-3*x)");
+  EXPECT_EQ(check_odesol(eq, bad, x), verdict::not_equivalent);
+}
+
+TEST(OdeSol, SecondOrderConstantCoeff) {
+  // y'' - 3y' + 2y = 0; y = C1*e^x + C2*e^{2x}
+  const expr eq =
+      parse("Eq(Derivative(y(x), (x, 2)) - 3*Derivative(y(x), x) + 2*y(x), 0)");
+  EXPECT_EQ(check_odesol(eq, parse("C1*exp(x) + C2*exp(2*x)"), x),
+            verdict::equivalent);
+  EXPECT_EQ(check_odesol(eq, parse("C1*exp(x) + C2*exp(3*x)"), x),
+            verdict::not_equivalent);
+}
+
+TEST(OdeSol, SeparableGrowth) {
+  // y' = 2*x*y; y = C1*exp(x**2)
+  const expr eq = parse("Eq(Derivative(y(x), x), 2*x*y(x))");
+  EXPECT_EQ(check_odesol(eq, parse("C1*exp(x**2)"), x),
+            verdict::equivalent);
+}
+
+TEST(OdeSol, PinnedSentinels) {
+  // llmopt's fixture ask: wrong constant-binding is the phantom-monomial
+  // class (wrong-without-erroring inside an exact procedure). Sentinels:
+  // (1) a candidate whose correctness DEPENDS on a specific C value must
+  //     NOT pass with C symbolic
+  const expr eq = parse("Eq(Derivative(y(x), x), y(x))");
+  //     y = C1*e^x passes; y = e^x + C1 solves only for C1 = 0
+  EXPECT_EQ(check_odesol(eq, parse("C1*exp(x)"), x), verdict::equivalent);
+  EXPECT_EQ(check_odesol(eq, parse("exp(x) + C1"), x),
+            verdict::not_equivalent);
+  // (2) the trig-identity class stays honestly UNDECIDED, never valid.
+  //     (NOT y' = 0 with candidate sin^2+cos^2 — diff cancels that
+  //     exactly, so it is a GENUINE solution; the identity must sit in
+  //     the residual itself.)
+  const expr eq2 = parse("Eq(y(x), 1)");
+  EXPECT_EQ(check_odesol(eq2, parse("sin(x)**2 + cos(x)**2"), x),
+            verdict::undecided);
+  // (3) a candidate still mentioning y is unsubstitutable: UNDECIDED
+  EXPECT_EQ(check_odesol(eq2, parse("y(x)"), x), verdict::undecided);
+}
+
+TEST(OdeSol, InitialConditionCheck) {
+  // pinned solution of y' + 3y = e^{2x} with y(0) = 1: C1 = 4/5
+  const expr sol = parse("exp(2*x)/5 + 4*exp(-3*x)/5");
+  EXPECT_TRUE(check_ic(sol, x, 0.0, 1.0, 0));
+  EXPECT_FALSE(check_ic(sol, x, 0.0, 2.0, 0));
+  // derivative IC (order 1): y'(0) = 2/5 - 12/5 = -2
+  EXPECT_TRUE(check_ic(sol, x, 0.0, -2.0, 1));
+}

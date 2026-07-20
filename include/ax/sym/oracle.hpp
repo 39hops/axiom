@@ -31,4 +31,22 @@ verdict equivalent(const expr& a, const expr& b, const expr& x);
 verdict equivalent_mod_const(const expr& candidate, const expr& integrand,
                              const expr& x);
 
+/** ODE solution check (L9, sympy checkodesol analogue). eq is an
+    Eq(lhs, rhs) carrier (or a bare expression, read as eq == 0) over
+    the reserved unknown y(x); candidate is substituted for y BEFORE any
+    differentiation — Derivative(y(x), x, ...n) carriers become the
+    candidate's nth derivative — leaving an ordinary expression that
+    equivalent() decides. Arbitrary constants (C1, C2, ...) stay
+    symbolic: canonical treats them as parameters and the numeric
+    sampler binds them, so a candidate correct only for a SPECIFIC
+    constant value fails. Diff-only doctrine holds: the oracle never
+    integrates. */
+verdict check_odesol(const expr& eq, const expr& candidate, const expr& x);
+
+/** Initial-condition check: |d^order candidate/dx^order (x0) - v| within
+    the witness tolerance. Numeric (candidates in farmed rows are pinned:
+    no free constants). */
+bool check_ic(const expr& candidate, const expr& x, double x0, double v,
+              int order);
+
 }  // namespace ax::sym

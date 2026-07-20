@@ -524,4 +524,109 @@ verdict equivalent_mod_const(const expr& candidate, const expr& integrand,
   return equivalent(diff(candidate, x), integrand, x);
 }
 
+// ---------------------------------------------------- L9: check_odesol
+
+namespace {
+
+/** Substitute the candidate for the unknown y: Derivative(y(x), x...n)
+    carriers become the candidate's nth derivative (whole-node, so the
+    inner y(x) never escapes), then bare y(x) becomes the candidate.
+    Precomputed derivative table keeps repeated carriers cheap. */
+expr subst_y(const expr& e, const expr& x,
+             const std::vector<expr>& cand_derivs) {
+  if (e.is_fn() && e.name() == "Derivative" && e.args().size() >= 2 &&
+      e.args()[0].is_fn() && e.args()[0].name() == "y") {
+    std::size_t order = 0;
+    bool all_x = true;
+    for (std::size_t i = 1; i < e.args().size(); ++i) {
+      all_x = all_x && e.args()[i].same(x);
+      ++order;
+    }
+    if (all_x && order < cand_derivs.size()) return cand_derivs[order];
+  }
+  if (e.is_fn() && e.name() == "y" && e.args().size() == 1 &&
+      e.args()[0].same(x))
+    return cand_derivs[0];
+  switch (e.k()) {
+    case kind::num:
+    case kind::sym:
+      return e;
+    case kind::fn: {
+      std::vector<expr> mapped;
+      mapped.reserve(e.args().size());
+      for (const expr& a : e.args())
+        mapped.push_back(subst_y(a, x, cand_derivs));
+      return expr::fn(e.name(), std::move(mapped));
+    }
+    case kind::add: {
+      expr o = expr::num(0);
+      for (const expr& t : e.args()) o = o + subst_y(t, x, cand_derivs);
+      return o;
+    }
+    case kind::mul: {
+      expr o = expr::num(1);
+      for (const expr& g : e.args()) o = o * subst_y(g, x, cand_derivs);
+      return o;
+    }
+    case kind::pow:
+      return subst_y(e.args()[0], x, cand_derivs)
+          .pow(subst_y(e.args()[1], x, cand_derivs));
+  }
+  return e;
+}
+
+std::size_t max_y_order(const expr& e, const expr& x) {
+  std::size_t best = 0;
+  if (e.is_fn() && e.name() == "Derivative" && e.args().size() >= 2 &&
+      e.args()[0].is_fn() && e.args()[0].name() == "y")
+    best = e.args().size() - 1;
+  for (const expr& a : e.args())
+    best = std::max(best, max_y_order(a, x));
+  return best;
+}
+
+bool contains_y(const expr& e) {
+  if (e.is_fn() && e.name() == "y") return true;
+  for (const expr& a : e.args())
+    if (contains_y(a)) return true;
+  return false;
+}
+
+}  // namespace
+
+verdict check_odesol(const expr& eq, const expr& candidate, const expr& x) {
+  // a candidate that still mentions y cannot be substituted-closed
+  if (contains_y(candidate)) return verdict::undecided;
+  expr lhs = eq;
+  expr rhs = expr::num(0);
+  if (eq.is_fn() && eq.name() == "Eq" && eq.args().size() == 2) {
+    lhs = eq.args()[0];
+    rhs = eq.args()[1];
+  }
+  const std::size_t order =
+      std::max(max_y_order(lhs, x), max_y_order(rhs, x));
+  std::vector<expr> cand_derivs{candidate};
+  for (std::size_t k = 0; k < order; ++k)
+    cand_derivs.push_back(diff(cand_derivs.back(), x));
+  const expr slhs = subst_y(lhs, x, cand_derivs);
+  const expr srhs = subst_y(rhs, x, cand_derivs);
+  // any y left (e.g. an order beyond the table, or y(g(x)) composition)
+  // is out of scope: honestly UNDECIDED, never guessed
+  if (contains_y(slhs) || contains_y(srhs)) return verdict::undecided;
+  return equivalent(slhs, srhs, x);
+}
+
+bool check_ic(const expr& candidate, const expr& x, double x0, double v,
+              int order) {
+  expr g = candidate;
+  for (int k = 0; k < order; ++k) g = diff(g, x);
+  std::map<std::string, double> env =
+      parameter_env(g, expr::num(0), x.name());
+  env[x.name()] = x0;
+  double got = 0.0;
+  if (!eval_at(g, env, got)) return false;
+  return std::abs(got - v) <= 1e-9 + 1e-9 * std::max(std::abs(got),
+                                                     std::abs(v));
+}
+
 }  // namespace ax::sym

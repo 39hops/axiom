@@ -19,8 +19,11 @@ struct carrier_spec {
   std::size_t min_args;
   std::size_t max_args;
 };
-constexpr std::array<carrier_spec, 3> kCarriers = {{
-    {"Integral", 2, 8}, {"Derivative", 2, 8}, {"Subs", 3, 3}}};
+constexpr std::array<carrier_spec, 4> kCarriers = {{
+    {"Integral", 2, 8},
+    {"Derivative", 2, 8},
+    {"Subs", 3, 3},
+    {"Eq", 2, 2}}};  // ODE rows (L9): Eq(lhs, rhs) carrier
 
 constexpr std::array<std::string_view, 4> kRejectedAtoms = {"oo", "zoo",
                                                            "nan", "I"};
