@@ -199,7 +199,19 @@ expr canonical(const expr& e, const expr& x) {
   // across num/den, and expand destroys that structure. Divide the
   // factored numerator by each denominator factor; accept only a clean
   // result (no negative powers / no inverted-Add wrappers survive).
-  if (!(r.den.is_num())) {
+  // short-circuit: the trial's unique value over the end-stage factor
+  // division is Add-factor cancellation (expand destroys those); skip
+  // the whole attempt when the denominator has no Add factor. (Perf:
+  // the unconditional trial taxed every canonical call and pushed 7
+  // borderline L7 roots over the search deadline.)
+  const auto has_add_factor = [](const expr& d) {
+    if (d.is_add()) return true;
+    if (!d.is_mul()) return false;
+    for (const expr& f : d.args())
+      if (f.is_add() || (f.is_pow() && f.args()[0].is_add())) return true;
+    return false;
+  };
+  if (!(r.den.is_num()) && has_add_factor(r.den)) {
     const std::function<bool(const expr&)> dirty = [&](const expr& q) {
       if (q.is_pow() && q.args()[1].is_num() && q.args()[1].value() < kZero)
         return true;
