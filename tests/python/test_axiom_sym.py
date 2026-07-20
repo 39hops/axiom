@@ -142,4 +142,28 @@ r = ax.emit_chain(ax.parse_sstr("Integral(x**2, x)"), 1,
 check("emit_chain survives a crashing slot", r["solved"])
 
 print(f"\n{len(failures)} failure(s)")
+
+# ---- slot-fire telemetry (L9 rung 4: HEAVY/LIGHT diet signal)
+
+calls2 = []
+def _slot2(node_sstr):
+    calls2.append(node_sstr)
+    return ["x/2 - sin(x)*cos(x)/2"] if "sin(x)**2" in node_sstr else []
+r = ax.solve(ax.parse_sstr("Integral(sin(x)**2, x)"), budget=100,
+             heurisch=_slot2)
+check("slot telemetry counts fires", r["solved"] and r["slot_fires"] >= 1)
+# decisive must agree with the winning history exactly (the slot may
+# legitimately lose the race to a native rule - that IS the HEAVY signal)
+check("slot decisive matches history",
+      r["slot_decisive"] == sum(1 for h in r["history"]
+                                if h.startswith("i_heurisch")))
+r = ax.solve(ax.parse_sstr("Integral(x**2, x)"), heurisch=_slot2)
+check("native solve has zero decisive slot steps",
+      r["solved"] and r["slot_decisive"] == 0)
+r = ax.emit_chain(ax.parse_sstr("Integral(sin(x)**2, x)"), 6, budget=100,
+                  heurisch=_slot2)
+check("emit_chain telemetry present",
+      r["solved"] and r["slot_fires"] >= 1 and r["slot_decisive"] >= 0)
+
+print(f"\n{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

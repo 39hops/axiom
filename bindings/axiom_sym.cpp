@@ -19,7 +19,9 @@
 
 #include <pybind11/stl.h>
 
+#include <atomic>
 #include <chrono>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -146,10 +148,13 @@ PYBIND11_MODULE(axiom_sym, m) {
         // GIL is released only around beam_search; slot invocations
         // re-acquire it from inside.
         se::rule_set rules = se::default_rules();  // copy: slots per call
+        // slot-fire telemetry (mass-targeted diet HEAVY/LIGHT signal)
+        auto slot_fires = std::make_shared<std::atomic<long long>>(0);
         if (!heurisch.is_none()) {
           rules.external.int_rules.emplace_back(
               "i_heurisch",
-              [heurisch](const sym::expr& node) -> std::vector<sym::expr> {
+              [heurisch, slot_fires](
+                  const sym::expr& node) -> std::vector<sym::expr> {
                 py::gil_scoped_acquire gil;
                 std::vector<sym::expr> out;
                 try {
@@ -159,6 +164,7 @@ PYBIND11_MODULE(axiom_sym, m) {
                 } catch (...) {
                   out.clear();  // conservative: slot failure = no fire
                 }
+                if (!out.empty()) ++*slot_fires;
                 return out;
               });
         }
@@ -203,6 +209,12 @@ PYBIND11_MODULE(axiom_sym, m) {
         out["history"] = res.best.history;
         out["nodes"] = res.nodes;
         out["expired"] = res.deadline_expired;
+        long long decisive = 0;
+        if (res.solved)
+          for (const auto& h : res.best.history)
+            if (h.rfind("i_heurisch", 0) == 0) ++decisive;
+        out["slot_fires"] = slot_fires->load();
+        out["slot_decisive"] = decisive;
         return out;
       },
       py::arg("root"), py::arg("budget") = 200, py::arg("plies") = 24,
@@ -226,10 +238,12 @@ PYBIND11_MODULE(axiom_sym, m) {
          py::object equivalence, long long deadline_ms) {
         namespace se = ax::search;
         se::rule_set rules = se::default_rules();
+        auto slot_fires = std::make_shared<std::atomic<long long>>(0);
         if (!heurisch.is_none()) {
           rules.external.int_rules.emplace_back(
               "i_heurisch",
-              [heurisch](const sym::expr& node) -> std::vector<sym::expr> {
+              [heurisch, slot_fires](
+                  const sym::expr& node) -> std::vector<sym::expr> {
                 py::gil_scoped_acquire gil;
                 std::vector<sym::expr> out;
                 try {
@@ -239,6 +253,7 @@ PYBIND11_MODULE(axiom_sym, m) {
                 } catch (...) {
                   out.clear();
                 }
+                if (!out.empty()) ++*slot_fires;
                 return out;
               });
         }
@@ -277,7 +292,7 @@ PYBIND11_MODULE(axiom_sym, m) {
           bool has_think = false;
         };
         std::vector<row> rows;
-        long long dropped = 0;
+        long long dropped = 0, decisive_steps = 0;
         bool solved = false, replay_ok = true;
         {
           py::gil_scoped_release run_without_gil;
@@ -292,6 +307,8 @@ PYBIND11_MODULE(axiom_sym, m) {
               const char* source = res.best.history.size() == 1
                                        ? "axiom-oneply"
                                        : "axiom-chain";
+              for (const auto& h : res.best.history)
+                if (h.rfind("i_heurisch", 0) == 0) ++decisive_steps;
               for (std::size_t i = 0; i + 1 < chain->size(); ++i) {
                 const sym::expr& cur = (*chain)[i].e;
                 const sym::expr& nxt = (*chain)[i + 1].e;
@@ -330,6 +347,8 @@ PYBIND11_MODULE(axiom_sym, m) {
         out["rows"] = out_rows;
         out["dropped_pairs"] = dropped;
         out["replay_ok"] = replay_ok;
+        out["slot_fires"] = slot_fires->load();
+        out["slot_decisive"] = decisive_steps;
         return out;
       },
       py::arg("root"), py::arg("level"), py::arg("budget") = 200,
