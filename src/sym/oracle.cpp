@@ -2,6 +2,7 @@
 
 #include <ax/sym/budget.hpp>
 #include <ax/sym/calc.hpp>
+#include <ax/sym/count_ops.hpp>
 #include <ax/sym/expand.hpp>
 #include <ax/sym/poly.hpp>
 
@@ -192,7 +193,11 @@ bool eval_at(const expr& e, std::map<std::string, double>& env, double& out) {
 
 }  // namespace
 
-expr canonical(const expr& e, const expr& x) {
+/** @param use_trial run the pre-expand factored-form cancellation.
+    The trial and the plain path both return correct canonical forms,
+    but DIFFERENT ones; canonical() below runs both and keeps the
+    smaller, so a trial that helps L4 cannot cost L7 a beam path. */
+expr canonical_impl(const expr& e, const expr& x, bool use_trial) {
   ratio r = as_ratio(e, x);
   // factored-form cancellation BEFORE expand: hash-consing makes shared
   // factors (incl. radical sums like 2*sqrt(x)+sqrt(5)) pointer-equal
@@ -211,7 +216,7 @@ expr canonical(const expr& e, const expr& x) {
       if (f.is_add() || (f.is_pow() && f.args()[0].is_add())) return true;
     return false;
   };
-  if (!(r.den.is_num()) && has_add_factor(r.den)) {
+  if (use_trial && !(r.den.is_num()) && has_add_factor(r.den)) {
     const std::function<bool(const expr&)> dirty = [&](const expr& q) {
       if (q.is_pow() && q.args()[1].is_num() && q.args()[1].value() < kZero)
         return true;
@@ -422,6 +427,18 @@ expr canonical(const expr& e, const expr& x) {
     return out;
   }
   return num / den;
+}
+
+expr canonical(const expr& e, const expr& x) {
+  const expr plain = canonical_impl(e, x, false);
+  // The trial path is a different-but-equal canonical form, not a better
+  // one: measured, enabling it unconditionally bought L4 (+11, factored
+  // radical sums survive) and cost L7 (-7, changed forms changed HCE and
+  // rerouted beams). Run both and keep the smaller — ties go to the
+  // plain path, so the search's historical trajectories are preserved.
+  const expr trial = canonical_impl(e, x, true);
+  if (trial.same(plain)) return plain;
+  return count_ops(trial) < count_ops(plain) ? trial : plain;
 }
 
 verdict equivalent(const expr& a, const expr& b, const expr& x) {
