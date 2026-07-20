@@ -119,6 +119,46 @@ TEST(RulesT4, SqrtLogComboBranch) {
   EXPECT_TRUE(certified) << cands.size() << " candidates, none certified";
 }
 
+TEST(RulesT4, MixedArgUsubAdmission) {
+  // three admission classes that once returned zero candidates:
+  // (1) mixed poly+trig argument whose Add ordering is not
+  //     scale-invariant (135*x**2 + 9*cos(x) + 27 leads with the cos
+  //     term while 15*x**2 + cos(x) + 3 leads with x**2),
+  // (2) same class through sin/cos-of-trig arguments,
+  // (3) sqrt-mixed argument whose derivative carries an embedded
+  //     fraction (sqrt(5)/(2*sqrt(x))) that as_ratio never combines.
+  const char* roots[] = {
+      "Integral(9*(15*x**2 + cos(x) + 3)*cos(5*x**3 + 3*x + sin(x) + 1), "
+      "x)",
+      "Integral(9*(-10*x + 4*sin(4*x) - 1)*sin(5*x**2 + x + cos(4*x)), x)",
+      "Integral(3*(4*sqrt(x)*(5*x - 2) + sqrt(5))*exp(sqrt(5)*sqrt(x) + "
+      "5*x**2 - 4*x + 3)/sqrt(x), x)",
+  };
+  const auto& rs = default_rules();
+  ax::search::rule_fn usub;
+  for (const auto& [name, fn] : rs.integral)
+    if (name == "i_usub") usub = fn;
+  ASSERT_TRUE(static_cast<bool>(usub));
+  for (const char* r : roots) {
+    const expr root = parse(r);
+    const auto cands = usub(root);
+    ASSERT_FALSE(cands.empty()) << r;
+    // the emitted Subs carrier must resolve to something the oracle
+    // certifies once its inner table integral is taken; check the full
+    // beam instead — end-to-end and oracle-verified at every edge.
+    beam_options opt;
+    opt.width = 8;
+    opt.max_plies = 16;
+    opt.max_nodes = 200;
+    opt.use_macros = true;
+    const auto res = beam_search(root, default_rules(), opt);
+    ASSERT_TRUE(res.solved) << r;
+    EXPECT_EQ(ax::sym::equivalent_mod_const(res.best.e, root.args()[0], x),
+              ax::sym::verdict::equivalent)
+        << r;
+  }
+}
+
 TEST(RulesT3, PathologyRootsBoundedUnderDeadline) {
   // llmopt-style pathology collection: roots that once wedged the gate.
   // Contract: with a short deadline the search RETURNS (solved or not)

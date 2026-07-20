@@ -288,11 +288,38 @@ std::vector<expr> i_usub(const expr& node) {
     // target must be matched in BOTH spellings (measured: every
     // sqrt-argument u-sub chain in the L4 worklist missed because the
     // original g node no longer existed after canonicalization).
-    const expr fq = sym::canonical(f / dg, x);
-    expr q = replace_subtree(fq, g, kU);
-    if (contains(q, x)) q = replace_subtree(q, sym::canonical(g, x), kU);
-    if (contains(q, x) || !contains(q, kU)) continue;
-    out.push_back(expr::subs_carrier(expr::integral(q, kU), kU, g));
+    const auto match = [&](const expr& fq) -> std::optional<expr> {
+      expr q = replace_subtree(fq, g, kU);
+      if (contains(q, x)) q = replace_subtree(q, sym::canonical(g, x), kU);
+      if (contains(q, x) || !contains(q, kU)) return std::nullopt;
+      return q;
+    };
+    auto q = match(sym::canonical(f / dg, x));
+    if (!q && dg.is_add()) {
+      // sympy's together: dg with embedded fractions (sqrt(5)/(2*sqrt(x))
+      // + 10*x - 4 from sqrt-mixed arguments) defeats the factored trial
+      // because as_ratio never combines Add terms over a common
+      // denominator. Clear the term denominators from BOTH sides and
+      // retry; the emitted candidate is still edge-verified downstream.
+      expr d = expr::num(1);
+      const auto collect_den = [&](const expr& fac) {
+        if (fac.is_pow() && fac.args()[1].is_num() &&
+            fac.args()[1].value() < ax::rational{})
+          d = d * fac.args()[0].pow(expr::num(-fac.args()[1].value()));
+        else if (fac.is_num() && !(fac.value().den() == ax::bigint(1)))
+          d = d * expr::num(ax::rational(fac.value().den(), ax::bigint(1)));
+      };
+      for (const expr& t : dg.args()) {
+        if (t.is_mul())
+          for (const expr& fac : t.args()) collect_den(fac);
+        else
+          collect_den(t);
+      }
+      if (!(d.is_num() && d.value() == ax::rational(ax::bigint(1))))
+        q = match(sym::canonical((f * d) / sym::expand(dg * d), x));
+    }
+    if (!q) continue;
+    out.push_back(expr::subs_carrier(expr::integral(*q, kU), kU, g));
   }
   return out;
 }

@@ -225,19 +225,31 @@ expr canonical(const expr& e, const expr& x) {
     // the first-term ratio and cancel to the constant.
     const auto divide_factor = [&](expr t, const expr& f) {
       if (f.is_add() && t.is_mul()) {
-        for (const expr& g : t.args()) {
+        for (const expr& g0 : t.args()) {
+          if (!g0.is_add()) continue;
+          // the numerator factor may hold nested products (24*sqrt(x)*
+          // (5*x - 2) + 6*sqrt(5)) where the denominator is distributed;
+          // expand it for the term-count/ratio match, but divide out the
+          // ORIGINAL factor g0 so the quotient stays factored.
+          const expr g = g0.args().size() == f.args().size()
+                             ? g0
+                             : expand(g0);
           if (!g.is_add() || g.args().size() != f.args().size()) continue;
-          // first-term ratio, dividing factor-wise (a bare g0/f0 with a
-          // Mul f0 builds pow(mul,-1) and never cancels)
-          expr c = g.args()[0];
-          const expr& f0 = f.args()[0];
-          if (f0.is_mul())
-            for (const expr& h : f0.args()) c = c / h;
-          else
-            c = c / f0;
-          if (!c.is_num()) continue;
-          if (g.same(expr::num(c.value()) * f))
-            return (t / g) * c;
+          // term ratio g0/fi, dividing factor-wise (a bare g0/fi with a
+          // Mul fi builds pow(mul,-1) and never cancels). Add ordering
+          // is not scale-invariant (135*x**2 + 9*cos(x) + 27 leads with
+          // the cos term while 15*x**2 + cos(x) + 3 leads with x**2), so
+          // g0 is ratioed against EVERY term of f, not just f0.
+          for (const expr& fi : f.args()) {
+            expr c = g.args()[0];
+            if (fi.is_mul())
+              for (const expr& h : fi.args()) c = c / h;
+            else
+              c = c / fi;
+            if (!c.is_num()) continue;
+            if (g.same(expr::num(c.value()) * f))
+              return (t / g0) * c;
+          }
         }
       }
       return t / f;
