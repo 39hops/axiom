@@ -187,6 +187,46 @@ TEST(RulesT4, InverseTrigPerfectSquareSqrt) {
   }
 }
 
+TEST(RulesT4, UnprodLogCosFamily) {
+  // the L7 log(cos(u)) family: f = d/dx[A(x)*log(cos(u))], whose OTHER
+  // half differentiates to tan. Two walls had to fall — i_unprod never
+  // considered log atoms in its (integral-cofactor) family, and neither
+  // the rule's residual test nor the oracle could cancel a tan-spelled
+  // integrand against a sin/cos-spelled derivative.
+  const std::pair<const char*, const char*> cases[] = {
+      {"Integral(-9*log(x)*tan(3*x) + 3*log(cos(3*x))/x, x)",
+       "3*log(x)*log(cos(3*x))"},
+      {"Integral(-2*x*tan(x) + 2*log(cos(x)), x)", "2*x*log(cos(x))"},
+  };
+  const auto& rs = default_rules();
+  ax::search::rule_fn up;
+  for (const auto& [n, f] : rs.integral)
+    if (n == "i_unprod") up = f;
+  ASSERT_TRUE(static_cast<bool>(up));
+  for (const auto& [in, want] : cases) {
+    const expr root = parse(in);
+    const auto c = up(root);
+    ASSERT_FALSE(c.empty()) << in;
+    EXPECT_TRUE(c[0].same(parse(want)))
+        << in << " -> " << ax::sym::to_sstr(c[0]);
+    // and the oracle must certify it (the verify_edge wall)
+    EXPECT_EQ(ax::sym::equivalent_mod_const(c[0], root.args()[0], x),
+              ax::sym::verdict::equivalent)
+        << in;
+  }
+}
+
+TEST(OracleT, TanNormalizationDecidesTanVsSinCos) {
+  // tan(u) = sin(u)/cos(u) must be structurally decided, not sampled
+  EXPECT_EQ(ax::sym::equivalent(parse("tan(3*x)"),
+                                parse("sin(3*x)/cos(3*x)"), x),
+            ax::sym::verdict::equivalent);
+  // and a genuine inequality must still be caught
+  EXPECT_EQ(ax::sym::equivalent(parse("tan(3*x)"),
+                                parse("sin(3*x)/cos(2*x)"), x),
+            ax::sym::verdict::not_equivalent);
+}
+
 TEST(RulesT3, PathologyRootsBoundedUnderDeadline) {
   // llmopt-style pathology collection: roots that once wedged the gate.
   // Contract: with a short deadline the search RETURNS (solved or not)

@@ -197,7 +197,55 @@ bool eval_at(const expr& e, std::map<std::string, double>& env, double& out) {
     The trial and the plain path both return correct canonical forms,
     but DIFFERENT ones; canonical() below runs both and keeps the
     smaller, so a trial that helps L4 cannot cost L7 a beam path. */
-expr canonical_impl(const expr& e, const expr& x, bool use_trial) {
+/** tan(u) -> sin(u)/cos(u). diff() spells tan derivatives as
+    1 + tan^2 and log-derivatives as sin/cos, so a tan-spelled input and
+    its own derivative never cancel structurally — canonical would call
+    them UNDECIDED forever (measured: the entire L7 log(cos(u)) family).
+    The identity holds wherever both sides are defined; at the poles
+    both spellings are undefined, and the numeric sampler already skips
+    non-finite points, so no witness changes hands. */
+expr untan(const expr& e) {
+  if (e.is_fn() && e.name() == "tan")
+    return expr::fn("sin", untan(e.args()[0])) /
+           expr::fn("cos", untan(e.args()[0]));
+  switch (e.k()) {
+    case kind::num:
+    case kind::sym:
+      return e;
+    case kind::fn: {
+      std::vector<expr> mapped;
+      mapped.reserve(e.args().size());
+      for (const expr& a : e.args()) mapped.push_back(untan(a));
+      return expr::fn(e.name(), std::move(mapped));
+    }
+    case kind::add: {
+      expr o = expr::num(0);
+      for (const expr& t : e.args()) o = o + untan(t);
+      return o;
+    }
+    case kind::mul: {
+      expr o = expr::num(1);
+      for (const expr& g : e.args()) o = o * untan(g);
+      return o;
+    }
+    case kind::pow:
+      return untan(e.args()[0]).pow(untan(e.args()[1]));
+  }
+  return e;
+}
+
+bool has_tan(const expr& e) {
+  if (e.is_fn() && e.name() == "tan") return true;
+  for (const expr& a : e.args())
+    if (has_tan(a)) return true;
+  return false;
+}
+
+expr canonical_impl(const expr& e0, const expr& x, bool use_trial) {
+  // untan rebuilds through the operator overloads, so it must run ONLY
+  // when a tan is actually present — otherwise it perturbs the term
+  // ordering as_ratio relies on (regressed a sqrt-recombination row).
+  const expr e = has_tan(e0) ? untan(e0) : e0;
   ratio r = as_ratio(e, x);
   // factored-form cancellation BEFORE expand: hash-consing makes shared
   // factors (incl. radical sums like 2*sqrt(x)+sqrt(5)) pointer-equal

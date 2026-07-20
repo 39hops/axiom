@@ -157,12 +157,52 @@ std::vector<expr> i_unprod(const expr& node) {
   if (sym::count_ops(f) > 200) return {};  // coarse gate; work budget is the guarantee
   std::vector<expr> out;
   std::vector<expr> seen;
+  // tan(u) -> sin(u)/cos(u): diff never produces tan, so an integrand
+  // spelled with tan can never cancel against a candidate's derivative
+  // (measured: the whole L7 log(cos(u)) family failed here, not at the
+  // ansatz). Normalization is applied ONLY to the residual comparison;
+  // the emitted antiderivative keeps its original spelling.
+  const std::function<expr(const expr&)> untan = [&](const expr& e) -> expr {
+    if (e.is_fn() && e.name() == "tan")
+      return expr::fn("sin", untan(e.args()[0])) /
+             expr::fn("cos", untan(e.args()[0]));
+    switch (e.k()) {
+      case sym::kind::num:
+      case sym::kind::sym:
+        return e;
+      case sym::kind::fn: {
+        std::vector<expr> mapped;
+        for (const expr& a : e.args()) mapped.push_back(untan(a));
+        return expr::fn(e.name(), std::move(mapped));
+      }
+      case sym::kind::add: {
+        expr o = expr::num(0);
+        for (const expr& t : e.args()) o = o + untan(t);
+        return o;
+      }
+      case sym::kind::mul: {
+        expr o = expr::num(1);
+        for (const expr& g : e.args()) o = o * untan(g);
+        return o;
+      }
+      case sym::kind::pow:
+        return untan(e.args()[0]).pow(untan(e.args()[1]));
+    }
+    return e;
+  };
   const auto emit = [&](const expr& A) -> bool {
     for (const expr& s : seen)
       if (s.same(A)) return false;
     seen.push_back(A);
-    const expr resid = sym::expand(f - sym::diff(A, x));
-    if (sym::count_ops(resid) >= sym::count_ops(f)) return false;
+    expr resid = sym::expand(f - sym::diff(A, x));
+    if (!is_zero_num(resid)) {
+      const expr norm =
+          sym::canonical(untan(f) - untan(sym::diff(A, x)), x);
+      if (is_zero_num(norm)) resid = norm;  // exact hit, tan-spelled
+    }
+    if (!is_zero_num(resid) &&
+        sym::count_ops(resid) >= sym::count_ops(f))
+      return false;
     out.push_back(is_zero_num(resid) ? A : A + expr::integral(resid, x));
     return out.size() >= 6;
   };
@@ -192,23 +232,37 @@ std::vector<expr> i_unprod(const expr& node) {
       if (!H) continue;
       if (emit(cof * *H)) return out;
     }
-    // guess family 2: t = cof * h(u) is the f'*H half -> A = (∫cof)*h(u)
-    for (const expr& fn : fns) {
+    // guess family 2: t = cof * h(u) is the f'*H half -> A = (∫cof)*h(u).
+    // log atoms participate here (L7 gap: the log(cos(u)) family — e.g.
+    // 3*log(cos(3*x))/x - 9*log(x)*tan(3*x) = d/dx[3*log(x)*log(cos(3*x))]
+    // — is unreachable otherwise, because the OTHER half's derivative
+    // spells tan, which no table rule produces).
+    std::vector<expr> fns2 = fns;
+    collect_fns(t, {"log"}, fns2);
+    for (const expr& fn : fns2) {
+      const bool is_log = fn.is_fn() && fn.name() == "log";
       const expr cof = sym::canonical(t / fn, x);
       if (bad_cof(cof) || !is_rational_in(cof, x)) continue;
-      // skip plain polynomials (family 1 territory)
       bool is_poly = true;
       try {
         (void)poly::from_expr(sym::expand(cof), x);
       } catch (const std::exception&) {
         is_poly = false;
       }
-      if (is_poly) continue;
+      // polynomial cofactors are family 1 territory for sin/cos/exp, but
+      // NOT for logs: 2*log(cos(x)) - 2*x*tan(x) = d/dx[2*x*log(cos(x))]
+      // needs cof = 2 to integrate to 2*x.
+      if (is_poly && !is_log) continue;
       const auto F = sym::integrate(cof, x);  // ax's own Phase-7 integrator
       if (!F) continue;
-      std::vector<expr> logs;
-      collect_fns(*F, {"log"}, logs);
-      if (logs.empty()) continue;
+      // the sin/cos/exp branch requires a log in F (that is what makes it
+      // the reverse-product half rather than a u-sub); a log atom already
+      // supplies the transcendental factor itself.
+      if (!is_log) {
+        std::vector<expr> logs;
+        collect_fns(*F, {"log"}, logs);
+        if (logs.empty()) continue;
+      }
       if (emit(*F * fn)) return out;
     }
   }
