@@ -8,6 +8,7 @@
 #include <ax/sym/print_sstr.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <vector>
 
@@ -379,6 +380,38 @@ std::vector<expr> i_transcend_div(const expr& node) {
 
 // --------------------------------------------------- i_inverse_trig
 
+/** sqrt(r) as an expr, exact when r is a perfect square of a rational
+    (sympy auto-evaluates sqrt(4) -> 2; an unevaluated sqrt(4) atom
+    leaves the verifier structurally blind and the edge UNDECIDED —
+    measured on the whole L5 inverse-trig family). Double gives the
+    root guess; the check is exact bigint arithmetic, so an out-of-range
+    guess only falls back to the symbolic atom (coverage, not
+    soundness). */
+expr sqrt_of(const ax::rational& r) {
+  const auto exact_root = [](const ax::bigint& n) -> std::optional<ax::bigint> {
+    double d = 0.0;
+    try {
+      d = std::stod(n.to_string());
+    } catch (const std::exception&) {
+      return std::nullopt;
+    }
+    if (!(d >= 0) || d > 9e18) return std::nullopt;
+    const auto g = static_cast<long long>(std::sqrt(d));
+    for (long long c : {g - 1, g, g + 1}) {
+      if (c < 0) continue;
+      const ax::bigint cb{c};
+      if (cb * cb == n) return cb;
+    }
+    return std::nullopt;
+  };
+  if (!(r < ax::rational{})) {
+    const auto pn = exact_root(r.num());
+    const auto pd = exact_root(r.den());
+    if (pn && pd) return expr::num(ax::rational(*pn, *pd));
+  }
+  return expr::fn("sqrt", expr::num(r));
+}
+
 std::vector<expr> i_inverse_trig(const expr& node) {
   const auto un = unpack_i(node);
   if (!un) return {};
@@ -415,9 +448,8 @@ std::vector<expr> i_inverse_trig(const expr& node) {
       const ax::rational a = pd.coeff(2);
       const ax::rational b = pd.coeff(0);
       return {poly_part +
-              nume / expr::fn("sqrt", expr::num(a * b)) *
-                  expr::fn("atan",
-                           x * expr::fn("sqrt", expr::num(a / b)))};
+              nume / sqrt_of(a * b) *
+                  expr::fn("atan", x * sqrt_of(a / b))};
     }
   }
   // sqrt form: den = co * sqrt(b - a*x^2), a>0, b>0
@@ -454,9 +486,8 @@ std::vector<expr> i_inverse_trig(const expr& node) {
         const ax::rational a = -q.coeff(2);
         const ax::rational b = q.coeff(0);
         if (kZero < a && kZero < b)
-          return {nume / (co * expr::fn("sqrt", expr::num(a))) *
-                  expr::fn("asin",
-                           x * expr::fn("sqrt", expr::num(a / b)))};
+          return {nume / (co * sqrt_of(a)) *
+                  expr::fn("asin", x * sqrt_of(a / b))};
       }
     }
   }

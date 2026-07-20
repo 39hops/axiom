@@ -159,6 +159,34 @@ TEST(RulesT4, MixedArgUsubAdmission) {
   }
 }
 
+TEST(RulesT4, InverseTrigPerfectSquareSqrt) {
+  // the L5 inverse-trig family regression: candidates spelled with
+  // unevaluated sqrt(4)/sqrt(1/4) atoms left the verifier structurally
+  // blind (edge UNDECIDED -> rejected; whole family unsolved). Perfect
+  // -square sqrts must evaluate exactly, and each candidate must be
+  // oracle-certified.
+  const auto& rs = default_rules();
+  ax::search::rule_fn it;
+  for (const auto& [n, f] : rs.integral)
+    if (n == "i_inverse_trig") it = f;
+  ASSERT_TRUE(static_cast<bool>(it));
+  const std::pair<const char*, const char*> cases[] = {
+      {"Integral((12*x**2 + 19)/(4*x**2 + 1), x)", "3*x + 8*atan(2*x)"},
+      {"Integral((3*x**2 + 4)/(x**2 + 1), x)", "3*x + atan(x)"},
+      {"Integral(1/(4*x**2 + 1), x)", "atan(2*x)/2"},
+  };
+  for (const auto& [in, want] : cases) {
+    const expr root = parse(in);
+    const auto c = it(root);
+    ASSERT_EQ(c.size(), 1u) << in;
+    EXPECT_TRUE(c[0].same(parse(want)))
+        << in << " -> " << ax::sym::to_sstr(c[0]);
+    EXPECT_EQ(ax::sym::equivalent_mod_const(c[0], root.args()[0], x),
+              ax::sym::verdict::equivalent)
+        << in;
+  }
+}
+
 TEST(RulesT3, PathologyRootsBoundedUnderDeadline) {
   // llmopt-style pathology collection: roots that once wedged the gate.
   // Contract: with a short deadline the search RETURNS (solved or not)
