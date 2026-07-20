@@ -543,6 +543,25 @@ std::string print(const expr& e) {
       return e.name();
     case kind::fn: {
       if (is_sqrt(e)) return "sqrt(" + print(e.args()[0]) + ")";
+      // sympy sstr compresses repeated Derivative limits to the tuple
+      // form: Derivative(y(x), x, x) prints as Derivative(y(x), (x, 2)).
+      if (e.name() == "Derivative" && e.args().size() >= 3) {
+        std::string out = "Derivative(" + print(e.args()[0]);
+        std::size_t i = 1;
+        while (i < e.args().size()) {
+          const expr& lim = e.args()[i];
+          std::size_t run = 1;
+          while (i + run < e.args().size() && e.args()[i + run].same(lim))
+            ++run;
+          out += ", ";
+          if (run >= 2)
+            out += "(" + print(lim) + ", " + std::to_string(run) + ")";
+          else
+            out += print(lim);
+          i += run;
+        }
+        return out + ")";
+      }
       std::string out = e.name() + "(";
       bool first = true;
       for (const expr& a : e.args()) {

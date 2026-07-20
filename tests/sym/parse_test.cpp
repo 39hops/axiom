@@ -1,5 +1,7 @@
 #include <ax/sym/parse.hpp>
 
+#include <ax/sym/print_sstr.hpp>
+
 #include <ax/sym/calc.hpp>
 #include <ax/sym/expr.hpp>
 #include <ax/sym/print.hpp>
@@ -123,3 +125,38 @@ TEST(Parse, ErrorsThrowWithOffset) {
 }
 
 }  // namespace
+
+bool contains_name(const expr& e, const std::string& n) {
+  if (e.is_fn() && e.name() == n) return true;
+  for (const expr& a : e.args())
+    if (contains_name(a, n)) return true;
+  return false;
+}
+
+TEST(Parse, OdeCarriersL9) {
+  // L9 rung 1: y(x) as the reserved unknown-function atom, and the
+  // sympy tuple-limit higher-order Derivative spelling. Both must
+  // round-trip through the sstr printer (byte-exact carrier dialect —
+  // farm rows are training text).
+  const expr y_of_x = parse("y(x)");
+  ASSERT_TRUE(y_of_x.is_fn());
+  EXPECT_EQ(y_of_x.name(), "y");
+  // tuple form desugars to repeated limits and interns identically
+  const expr d2_tuple = parse("Derivative(y(x), (x, 2))");
+  const expr d2_repeat = parse("Derivative(y(x), x, x)");
+  EXPECT_TRUE(d2_tuple.same(d2_repeat));
+  const expr d3 = parse("Derivative(y(x), (x, 3))");
+  EXPECT_TRUE(d3.same(parse("Derivative(y(x), x, x, x)")));
+  // sympy prints order>=2 as the tuple form; ours must match
+  EXPECT_EQ(ax::sym::to_sstr(d2_tuple), "Derivative(y(x), (x, 2))");
+  EXPECT_EQ(ax::sym::to_sstr(parse("Derivative(y(x), x)")),
+            "Derivative(y(x), x)");
+  // a first-order ODE equation shape parses whole
+  const expr eq =
+      parse("Derivative(y(x), x) + 3*y(x) - exp(2*x)");
+  EXPECT_TRUE(contains_name(eq, "y"));
+  // other unknown functions stay rejected
+  EXPECT_THROW(parse("g(x)"), parse_error);
+  // y with wrong arity rejected
+  EXPECT_THROW(parse("y(x, 2)"), parse_error);
+}

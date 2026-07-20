@@ -172,15 +172,49 @@ class parser {
       const carrier_spec* carrier = nullptr;
       for (const auto& c : kCarriers)
         if (c.name == name) carrier = &c;
-      if (!carrier && !contains(kKnownFns, name)) {
+      // "y" is the reserved unknown function for ODE rows (L9): an
+      // opaque carrier atom — never differentiated (substitution
+      // precedes diff in check_odesol), never evaluated numerically.
+      const bool is_unknown_fn = name == "y";
+      if (!carrier && !is_unknown_fn && !contains(kKnownFns, name)) {
         i_ = start;
         fail("unknown function '" + name + "'");
       }
       std::vector<expr> fargs;
-      fargs.push_back(sum());
+      const auto push_arg = [&] {
+        skip_ws();
+        // sympy spells higher-order Derivative limits as the tuple
+        // (x, n); desugar to n repeated symbol limits so both
+        // spellings intern to the same carrier.
+        if (carrier != nullptr && !fargs.empty() && peek('(')) {
+          const std::size_t save = i_;
+          eat('(');
+          const expr sym_arg = sum();
+          skip_ws();
+          if (sym_arg.is_sym() && eat(',')) {
+            const expr n_arg = sum();
+            skip_ws();
+            if (n_arg.is_num() && eat(')') &&
+                n_arg.value().den() == bigint(1)) {
+              long long n = 0;
+              try {
+                n = std::stoll(n_arg.value().num().to_string());
+              } catch (const std::exception&) {
+                n = 0;
+              }
+              if (n < 1 || n > 8) fail("tuple limit order out of range");
+              for (long long k = 0; k < n; ++k) fargs.push_back(sym_arg);
+              return;
+            }
+          }
+          i_ = save;  // not a (sym, n) tuple: an ordinary paren expr
+        }
+        fargs.push_back(sum());
+      };
+      push_arg();
       skip_ws();
       while (eat(',')) {
-        fargs.push_back(sum());
+        push_arg();
         skip_ws();
       }
       if (!eat(')')) fail("expected ')'");
