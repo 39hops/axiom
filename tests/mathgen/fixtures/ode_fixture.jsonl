@@ -1,0 +1,90 @@
+{"family": "ode_linear1", "level": 1, "seed": 0, "eq": "Eq(2*y(x) + Derivative(y(x), x), 0)", "sol": "3*exp(-2*x)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_linear1", "level": 1, "seed": 1, "eq": "Eq(2*y(x) + Derivative(y(x), x), 0)", "sol": "5*exp(-2*x)", "x0": 0, "y0": "5", "yp0": null}
+{"family": "ode_linear1", "level": 1, "seed": 2, "eq": "Eq(-2*y(x) + Derivative(y(x), x), 0)", "sol": "5*exp(2*x)", "x0": 0, "y0": "5", "yp0": null}
+{"family": "ode_linear1", "level": 1, "seed": 3, "eq": "Eq(y(x) + Derivative(y(x), x), 0)", "sol": "5*exp(-x)", "x0": 0, "y0": "5", "yp0": null}
+{"family": "ode_linear1", "level": 1, "seed": 4, "eq": "Eq(3*y(x) + Derivative(y(x), x), 0)", "sol": "4*exp(-3*x)", "x0": 0, "y0": "4", "yp0": null}
+{"family": "ode_linear1", "level": 1, "seed": 5, "eq": "Eq(2*y(x) + Derivative(y(x), x), 0)", "sol": "exp(-2*x)", "x0": 0, "y0": "1", "yp0": null}
+{"family": "ode_linear1", "level": 1, "seed": 6, "eq": "Eq(y(x) + Derivative(y(x), x), 0)", "sol": "5*exp(-x)", "x0": 0, "y0": "5", "yp0": null}
+{"family": "ode_linear1", "level": 1, "seed": 7, "eq": "Eq(-3*y(x) + Derivative(y(x), x), 0)", "sol": "exp(3*x)", "x0": 0, "y0": "1", "yp0": null}
+{"family": "ode_linear1", "level": 1, "seed": 8, "eq": "Eq(-y(x) + Derivative(y(x), x), 0)", "sol": "exp(x)", "x0": 0, "y0": "1", "yp0": null}
+{"family": "ode_linear1", "level": 1, "seed": 9, "eq": "Eq(2*y(x) + Derivative(y(x), x), 0)", "sol": "3*exp(-2*x)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_linear1", "level": 2, "seed": 0, "eq": "Eq(y(x) + Derivative(y(x), x), 3*x + 2)", "sol": "3*x - 1 + exp(-x)", "x0": 0, "y0": "0", "yp0": null}
+{"family": "ode_linear1", "level": 2, "seed": 1, "eq": "Eq(2*y(x) + Derivative(y(x), x), 10*x + 5)", "sol": "5*x + 3*exp(-2*x)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_linear1", "level": 2, "seed": 2, "eq": "Eq(y(x) + Derivative(y(x), x), 4*x + 6)", "sol": "4*x + 2 + 2*exp(-x)", "x0": 0, "y0": "4", "yp0": null}
+{"family": "ode_linear1", "level": 2, "seed": 3, "eq": "Eq(-2*y(x) + Derivative(y(x), x), -4*x - 4)", "sol": "2*x + exp(2*x) + 3", "x0": 0, "y0": "4", "yp0": null}
+{"family": "ode_linear1", "level": 2, "seed": 4, "eq": "Eq(3*y(x) + Derivative(y(x), x), 3*x - 8)", "sol": "x - 3 + exp(-3*x)", "x0": 0, "y0": "-2", "yp0": null}
+{"family": "ode_linear1", "level": 2, "seed": 5, "eq": "Eq(-y(x) + Derivative(y(x), x), -x - 2)", "sol": "x + exp(x) + 3", "x0": 0, "y0": "4", "yp0": null}
+{"family": "ode_linear1", "level": 2, "seed": 6, "eq": "Eq(-y(x) + Derivative(y(x), x), 3 - x)", "sol": "x + exp(x) - 2", "x0": 0, "y0": "-1", "yp0": null}
+{"family": "ode_linear1", "level": 2, "seed": 7, "eq": "Eq(-3*y(x) + Derivative(y(x), x), 12 - 9*x)", "sol": "3*x + 4*exp(3*x) - 3", "x0": 0, "y0": "1", "yp0": null}
+{"family": "ode_linear1", "level": 2, "seed": 8, "eq": "Eq(-2*y(x) + Derivative(y(x), x), 5 - 6*x)", "sol": "3*x + 3*exp(2*x) - 1", "x0": 0, "y0": "2", "yp0": null}
+{"family": "ode_linear1", "level": 2, "seed": 9, "eq": "Eq(-y(x) + Derivative(y(x), x), 2 - 5*x)", "sol": "5*x + 2*exp(x) + 3", "x0": 0, "y0": "5", "yp0": null}
+{"family": "ode_linear1", "level": 3, "seed": 0, "eq": "Eq(2*y(x) + Derivative(y(x), x), 8*x + 6)", "sol": "4*x + 1 + 4*exp(-2*x)", "x0": 0, "y0": "5", "yp0": null}
+{"family": "ode_linear1", "level": 3, "seed": 1, "eq": "Eq(2*y(x) + Derivative(y(x), x), 10*x + 5)", "sol": "5*x + 4*exp(-2*x)", "x0": 0, "y0": "4", "yp0": null}
+{"family": "ode_linear1", "level": 3, "seed": 2, "eq": "Eq(-2*y(x) + Derivative(y(x), x), 3 - 6*x)", "sol": "3*x + 2*exp(2*x)", "x0": 0, "y0": "2", "yp0": null}
+{"family": "ode_linear1", "level": 3, "seed": 3, "eq": "Eq(-3*y(x) + Derivative(y(x), x), -6*x - 4)", "sol": "2*x + 4*exp(3*x) + 2", "x0": 0, "y0": "6", "yp0": null}
+{"family": "ode_linear1", "level": 3, "seed": 4, "eq": "Eq(2*y(x) + Derivative(y(x), x), 4*x + 6)", "sol": "2*x + 2 + 3*exp(-2*x)", "x0": 0, "y0": "5", "yp0": null}
+{"family": "ode_linear1", "level": 3, "seed": 5, "eq": "Eq(3*y(x) + Derivative(y(x), x), 9*x + 9)", "sol": "3*x + 2 + 2*exp(-3*x)", "x0": 0, "y0": "4", "yp0": null}
+{"family": "ode_linear1", "level": 3, "seed": 6, "eq": "Eq(3*y(x) + Derivative(y(x), x), 15*x + 14)", "sol": "5*x + 3 + 3*exp(-3*x)", "x0": 0, "y0": "6", "yp0": null}
+{"family": "ode_linear1", "level": 3, "seed": 7, "eq": "Eq(-y(x) + Derivative(y(x), x), 2 - 5*x)", "sol": "5*x + 3*exp(x) + 3", "x0": 0, "y0": "6", "yp0": null}
+{"family": "ode_linear1", "level": 3, "seed": 8, "eq": "Eq(y(x) + Derivative(y(x), x), 3*x + 2)", "sol": "3*x - 1 + 2*exp(-x)", "x0": 0, "y0": "1", "yp0": null}
+{"family": "ode_linear1", "level": 3, "seed": 9, "eq": "Eq(-y(x) + Derivative(y(x), x), 5 - 3*x)", "sol": "3*x + 4*exp(x) - 2", "x0": 0, "y0": "2", "yp0": null}
+{"family": "ode_cc2", "level": 1, "seed": 0, "eq": "Eq(-y(x) + Derivative(y(x), (x, 2)), 0)", "sol": "4*exp(x) + 2*exp(-x)", "x0": 0, "y0": "6", "yp0": "2"}
+{"family": "ode_cc2", "level": 1, "seed": 1, "eq": "Eq(-6*y(x) - Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "2*exp(3*x) - 3*exp(-2*x)", "x0": 0, "y0": "-1", "yp0": "12"}
+{"family": "ode_cc2", "level": 1, "seed": 2, "eq": "Eq(6*y(x) + 5*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "2*exp(-2*x) + exp(-3*x)", "x0": 0, "y0": "3", "yp0": "-7"}
+{"family": "ode_cc2", "level": 1, "seed": 3, "eq": "Eq(2*y(x) + 3*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "2*exp(-x) - 3*exp(-2*x)", "x0": 0, "y0": "-1", "yp0": "4"}
+{"family": "ode_cc2", "level": 1, "seed": 4, "eq": "Eq(-6*y(x) + Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "2*exp(2*x) - 4*exp(-3*x)", "x0": 0, "y0": "-2", "yp0": "16"}
+{"family": "ode_cc2", "level": 1, "seed": 5, "eq": "Eq(6*y(x) + 5*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "exp(-2*x) + 3*exp(-3*x)", "x0": 0, "y0": "4", "yp0": "-11"}
+{"family": "ode_cc2", "level": 1, "seed": 6, "eq": "Eq(-3*y(x) + 2*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "exp(x) + 3*exp(-3*x)", "x0": 0, "y0": "4", "yp0": "-8"}
+{"family": "ode_cc2", "level": 1, "seed": 7, "eq": "Eq(-2*y(x) - Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "3*exp(2*x) + 2*exp(-x)", "x0": 0, "y0": "5", "yp0": "4"}
+{"family": "ode_cc2", "level": 1, "seed": 8, "eq": "Eq(2*y(x) - 3*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "4*exp(2*x) + 3*exp(x)", "x0": 0, "y0": "7", "yp0": "11"}
+{"family": "ode_cc2", "level": 1, "seed": 9, "eq": "Eq(2*y(x) + 3*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "3*exp(-x) + 2*exp(-2*x)", "x0": 0, "y0": "5", "yp0": "-7"}
+{"family": "ode_cc2", "level": 2, "seed": 0, "eq": "Eq(2*y(x) - 3*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "3*exp(2*x) + exp(x)", "x0": 0, "y0": "4", "yp0": "7"}
+{"family": "ode_cc2", "level": 2, "seed": 1, "eq": "Eq(6*y(x) - 5*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "2*exp(3*x) + 4*exp(2*x)", "x0": 0, "y0": "6", "yp0": "14"}
+{"family": "ode_cc2", "level": 2, "seed": 2, "eq": "Eq(-9*y(x) + Derivative(y(x), (x, 2)), 0)", "sol": "4*exp(3*x) + 2*exp(-3*x)", "x0": 0, "y0": "6", "yp0": "6"}
+{"family": "ode_cc2", "level": 2, "seed": 3, "eq": "Eq(6*y(x) - 5*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "-3*exp(3*x) + 2*exp(2*x)", "x0": 0, "y0": "-1", "yp0": "-5"}
+{"family": "ode_cc2", "level": 2, "seed": 4, "eq": "Eq(-2*y(x) + Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "-exp(x) + exp(-2*x)", "x0": 0, "y0": "0", "yp0": "-3"}
+{"family": "ode_cc2", "level": 2, "seed": 5, "eq": "Eq(-6*y(x) - Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "3*exp(3*x) - 3*exp(-2*x)", "x0": 0, "y0": "0", "yp0": "15"}
+{"family": "ode_cc2", "level": 2, "seed": 6, "eq": "Eq(2*y(x) + 3*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "-3*exp(-x) + exp(-2*x)", "x0": 0, "y0": "-2", "yp0": "1"}
+{"family": "ode_cc2", "level": 2, "seed": 7, "eq": "Eq(-2*y(x) - Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "-2*exp(2*x) + exp(-x)", "x0": 0, "y0": "-1", "yp0": "-5"}
+{"family": "ode_cc2", "level": 2, "seed": 8, "eq": "Eq(6*y(x) - 5*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "-4*exp(3*x) + 3*exp(2*x)", "x0": 0, "y0": "-1", "yp0": "-6"}
+{"family": "ode_cc2", "level": 2, "seed": 9, "eq": "Eq(6*y(x) + 5*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "3*exp(-2*x) + 2*exp(-3*x)", "x0": 0, "y0": "5", "yp0": "-12"}
+{"family": "ode_cc2", "level": 3, "seed": 0, "eq": "Eq(3*y(x) - 4*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "exp(3*x) + exp(x)", "x0": 0, "y0": "2", "yp0": "4"}
+{"family": "ode_cc2", "level": 3, "seed": 1, "eq": "Eq(-6*y(x) - Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "-exp(3*x) + 3*exp(-2*x)", "x0": 0, "y0": "2", "yp0": "-9"}
+{"family": "ode_cc2", "level": 3, "seed": 2, "eq": "Eq(-3*y(x) - 2*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "3*exp(3*x) - 3*exp(-x)", "x0": 0, "y0": "0", "yp0": "12"}
+{"family": "ode_cc2", "level": 3, "seed": 3, "eq": "Eq(-y(x) + Derivative(y(x), (x, 2)), 0)", "sol": "-2*exp(x) + 4*exp(-x)", "x0": 0, "y0": "2", "yp0": "-6"}
+{"family": "ode_cc2", "level": 3, "seed": 4, "eq": "Eq(-6*y(x) - Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "-3*exp(3*x) + 3*exp(-2*x)", "x0": 0, "y0": "0", "yp0": "-15"}
+{"family": "ode_cc2", "level": 3, "seed": 5, "eq": "Eq(-6*y(x) - Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "4*exp(3*x) + 2*exp(-2*x)", "x0": 0, "y0": "6", "yp0": "8"}
+{"family": "ode_cc2", "level": 3, "seed": 6, "eq": "Eq(-6*y(x) - Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "3*exp(3*x) + 2*exp(-2*x)", "x0": 0, "y0": "5", "yp0": "5"}
+{"family": "ode_cc2", "level": 3, "seed": 7, "eq": "Eq(-3*y(x) - 2*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "2*exp(3*x) + 2*exp(-x)", "x0": 0, "y0": "4", "yp0": "4"}
+{"family": "ode_cc2", "level": 3, "seed": 8, "eq": "Eq(-y(x) + Derivative(y(x), (x, 2)), 0)", "sol": "3*exp(x) + 4*exp(-x)", "x0": 0, "y0": "7", "yp0": "-1"}
+{"family": "ode_cc2", "level": 3, "seed": 9, "eq": "Eq(2*y(x) + 3*Derivative(y(x), x) + Derivative(y(x), (x, 2)), 0)", "sol": "4*exp(-x) + 2*exp(-2*x)", "x0": 0, "y0": "6", "yp0": "-8"}
+{"family": "ode_separable", "level": 1, "seed": 0, "eq": "Eq(Derivative(y(x), x), -2*x*y(x))", "sol": "3*exp(-x**2)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_separable", "level": 1, "seed": 1, "eq": "Eq(Derivative(y(x), x), x*y(x))", "sol": "exp(x**2/2)", "x0": 0, "y0": "1", "yp0": null}
+{"family": "ode_separable", "level": 1, "seed": 2, "eq": "Eq(Derivative(y(x), x), -x*y(x))", "sol": "5*exp(-x**2/2)", "x0": 0, "y0": "5", "yp0": null}
+{"family": "ode_separable", "level": 1, "seed": 3, "eq": "Eq(Derivative(y(x), x), -2*x*y(x))", "sol": "2*exp(-x**2)", "x0": 0, "y0": "2", "yp0": null}
+{"family": "ode_separable", "level": 1, "seed": 4, "eq": "Eq(Derivative(y(x), x), -2*x*y(x))", "sol": "exp(-x**2)", "x0": 0, "y0": "1", "yp0": null}
+{"family": "ode_separable", "level": 1, "seed": 5, "eq": "Eq(Derivative(y(x), x), -x*y(x))", "sol": "3*exp(-x**2/2)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_separable", "level": 1, "seed": 6, "eq": "Eq(Derivative(y(x), x), -x*y(x))", "sol": "2*exp(-x**2/2)", "x0": 0, "y0": "2", "yp0": null}
+{"family": "ode_separable", "level": 1, "seed": 7, "eq": "Eq(Derivative(y(x), x), x*y(x))", "sol": "2*exp(x**2/2)", "x0": 0, "y0": "2", "yp0": null}
+{"family": "ode_separable", "level": 1, "seed": 8, "eq": "Eq(Derivative(y(x), x), x*y(x))", "sol": "exp(x**2/2)", "x0": 0, "y0": "1", "yp0": null}
+{"family": "ode_separable", "level": 1, "seed": 9, "eq": "Eq(Derivative(y(x), x), -2*x*y(x))", "sol": "4*exp(-x**2)", "x0": 0, "y0": "4", "yp0": null}
+{"family": "ode_separable", "level": 2, "seed": 0, "eq": "Eq(Derivative(y(x), x), 2*x*y(x))", "sol": "exp(x**2)", "x0": 0, "y0": "1", "yp0": null}
+{"family": "ode_separable", "level": 2, "seed": 1, "eq": "Eq(Derivative(y(x), x), 2*x*y(x))", "sol": "exp(x**2)", "x0": 0, "y0": "1", "yp0": null}
+{"family": "ode_separable", "level": 2, "seed": 2, "eq": "Eq(Derivative(y(x), x), x*y(x))", "sol": "4*exp(x**2/2)", "x0": 0, "y0": "4", "yp0": null}
+{"family": "ode_separable", "level": 2, "seed": 3, "eq": "Eq(Derivative(y(x), x), x*y(x))", "sol": "3*exp(x**2/2)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_separable", "level": 2, "seed": 4, "eq": "Eq(Derivative(y(x), x), -x*y(x))", "sol": "3*exp(-x**2/2)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_separable", "level": 2, "seed": 5, "eq": "Eq(Derivative(y(x), x), 2*x*y(x))", "sol": "3*exp(x**2)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_separable", "level": 2, "seed": 6, "eq": "Eq(Derivative(y(x), x), 2*x*y(x))", "sol": "4*exp(x**2)", "x0": 0, "y0": "4", "yp0": null}
+{"family": "ode_separable", "level": 2, "seed": 7, "eq": "Eq(Derivative(y(x), x), x*y(x))", "sol": "2*exp(x**2/2)", "x0": 0, "y0": "2", "yp0": null}
+{"family": "ode_separable", "level": 2, "seed": 8, "eq": "Eq(Derivative(y(x), x), -2*x*y(x))", "sol": "4*exp(-x**2)", "x0": 0, "y0": "4", "yp0": null}
+{"family": "ode_separable", "level": 2, "seed": 9, "eq": "Eq(Derivative(y(x), x), -2*x*y(x))", "sol": "2*exp(-x**2)", "x0": 0, "y0": "2", "yp0": null}
+{"family": "ode_separable", "level": 3, "seed": 0, "eq": "Eq(Derivative(y(x), x), -x**2*y(x))", "sol": "2*exp(-x**3/3)", "x0": 0, "y0": "2", "yp0": null}
+{"family": "ode_separable", "level": 3, "seed": 1, "eq": "Eq(Derivative(y(x), x), -2*x**2*y(x))", "sol": "5*exp(-2*x**3/3)", "x0": 0, "y0": "5", "yp0": null}
+{"family": "ode_separable", "level": 3, "seed": 2, "eq": "Eq(Derivative(y(x), x), -x*y(x))", "sol": "3*exp(-x**2/2)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_separable", "level": 3, "seed": 3, "eq": "Eq(Derivative(y(x), x), x*y(x))", "sol": "3*exp(x**2/2)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_separable", "level": 3, "seed": 4, "eq": "Eq(Derivative(y(x), x), x**2*y(x))", "sol": "3*exp(x**3/3)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_separable", "level": 3, "seed": 5, "eq": "Eq(Derivative(y(x), x), x**2*y(x))", "sol": "3*exp(x**3/3)", "x0": 0, "y0": "3", "yp0": null}
+{"family": "ode_separable", "level": 3, "seed": 6, "eq": "Eq(Derivative(y(x), x), 2*x**2*y(x))", "sol": "2*exp(2*x**3/3)", "x0": 0, "y0": "2", "yp0": null}
+{"family": "ode_separable", "level": 3, "seed": 7, "eq": "Eq(Derivative(y(x), x), 2*x**2*y(x))", "sol": "5*exp(2*x**3/3)", "x0": 0, "y0": "5", "yp0": null}
+{"family": "ode_separable", "level": 3, "seed": 8, "eq": "Eq(Derivative(y(x), x), x*y(x))", "sol": "2*exp(x**2/2)", "x0": 0, "y0": "2", "yp0": null}
+{"family": "ode_separable", "level": 3, "seed": 9, "eq": "Eq(Derivative(y(x), x), -2*x*y(x))", "sol": "5*exp(-x**2)", "x0": 0, "y0": "5", "yp0": null}

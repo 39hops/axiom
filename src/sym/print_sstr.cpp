@@ -115,6 +115,11 @@ class_key class_key_of(const expr& rest) {
       if (n == "sin") return {4, 20, "sin"};
       if (n == "cos") return {4, 21, "cos"};
       if (n == "tan") return {4, 22, "tan"};
+      // carriers sort AFTER applied unknowns: sympy prints
+      // 2*y(x) + Derivative(y(x), x) with y(x) first (L9 rows). Bucket
+      // 20000 keeps carrier-vs-carrier order unchanged (name compare).
+      if (n == "Derivative" || n == "Integral" || n == "Subs")
+        return {4, 20000, n};
       return {4, 10000, n};
     }
   }
