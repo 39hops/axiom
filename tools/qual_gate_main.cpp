@@ -1,6 +1,7 @@
 /** qual-gate: run the native solver over qualification roots and report
     per-level solve counts + per-root timing. Usage:
-      axiom-qual-gate <roots.jsonl> [max_level] [budget] [plies] [width] [prior.tsv]
+      axiom-qual-gate <roots.jsonl> [max_level] [budget] [plies] [width]
+                      [prior.tsv] [deadline_s] [firemask.tsv]
     Every reported solve is oracle-valid: diff-back equivalence + full
     replay verification. Chains and misses stream to stdout as TSV. */
 #include <ax/search/search.hpp>
@@ -32,6 +33,16 @@ int main(int argc, char** argv) {
   // per-root wall in seconds (arg 8); 20s is the priced default, 60s is
   // the expiry-pricing protocol
   const int deadline_s = argc > 7 ? std::atoi(argv[7]) : 20;
+  // fire-mask sidecar (arg 9): warm-start the persistent no-fire memo
+  // and save the grown mask back at exit ("magic math boards" rung 1)
+  std::string mask_path;
+  if (argc > 8) {
+    mask_path = argv[8];
+    search::fire_mask_enable(search::default_rules());
+    if (search::fire_mask_load(mask_path, search::default_rules()))
+      std::cerr << "[fire-mask] warm start: "
+                << search::fire_mask_size() << " entries\n";
+  }
 
   std::ifstream in(argv[1]);
   if (!in.good()) {
@@ -110,5 +121,10 @@ int main(int argc, char** argv) {
             << wall_total << "s):\n";
   for (const auto& [lvl, tot] : total)
     std::cerr << "  L" << lvl << ": " << solved[lvl] << "/" << tot << "\n";
+  if (!mask_path.empty()) {
+    search::fire_mask_save(mask_path);
+    std::cerr << "[fire-mask] saved " << search::fire_mask_size()
+              << " entries, " << search::fire_mask_hits() << " hits\n";
+  }
   return 0;
 }

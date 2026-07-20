@@ -105,6 +105,11 @@ using memo_key = std::pair<const void*, std::size_t>;
 
 }  // namespace
 
+namespace {
+thread_local bool clear_rule_cache_flag = false;
+}
+void successors_cache_clear() { clear_rule_cache_flag = true; }
+
 std::vector<std::pair<std::string, state>> successors(
     const state& s, const rule_set& rules, const successor_options& opt) {
   std::vector<std::pair<std::string, state>> out;
@@ -114,7 +119,10 @@ std::vector<std::pair<std::string, state>> successors(
   static thread_local std::map<std::pair<const std::string*, std::size_t>,
                                std::vector<expr>>
       rule_cache;
-  if (rule_cache.size() > 200'000) rule_cache.clear();
+  if (rule_cache.size() > 200'000 || clear_rule_cache_flag) {
+    rule_cache.clear();
+    clear_rule_cache_flag = false;
+  }
 
   const auto want = [&](const std::string& name) {
     if (opt.only_rules != nullptr &&
@@ -152,6 +160,11 @@ std::vector<std::pair<std::string, state>> successors(
     auto it = rule_cache.find(key);
     if (it == rule_cache.end()) {
       std::vector<expr> rewrites;
+      // persistent no-fire memo (Arc 3): skip a fire this mask has seen
+      // produce nothing; proposal-side only, fingerprint-guarded
+      if (fire_mask_check(r.first, node))
+        return rule_cache.emplace(key, std::move(rewrites)).first->second;
+      bool aborted = false;
       const auto t0 = std::chrono::steady_clock::now();
       try {
         sym::work_budget_scope budget(std::chrono::milliseconds(8000));
@@ -159,6 +172,7 @@ std::vector<std::pair<std::string, state>> successors(
       } catch (const std::exception&) {
         // a crashing or budget-expired rule costs one move, never the
         // search (work_expired derives runtime_error and lands here)
+        aborted = true;  // NOT a proven no-fire: never mask it
       }
       const double dt = std::chrono::duration<double>(
                             std::chrono::steady_clock::now() - t0)
@@ -167,6 +181,7 @@ std::vector<std::pair<std::string, state>> successors(
         std::cerr << "[slow-fire] " << r.first << " "
                   << sym::count_ops(node) << " ops " << dt << "s"
                   << std::endl;
+      if (rewrites.empty() && !aborted) fire_mask_record(r.first, node);
       it = rule_cache.emplace(key, std::move(rewrites)).first;
     }
     return it->second;

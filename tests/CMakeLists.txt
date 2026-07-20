@@ -54,6 +54,7 @@ add_executable(ax_tests
   search/chassis_test.cpp
   search/rules_test.cpp
   search/emit_test.cpp
+  search/firemask_test.cpp
 )
 target_compile_definitions(ax_tests PRIVATE
   AX_SOURCE_DIR="${CMAKE_SOURCE_DIR}")

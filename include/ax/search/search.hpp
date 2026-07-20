@@ -188,6 +188,30 @@ struct annotation {
 annotation annotate(const expr& cur, const rule_set& rules,
                     const std::string& fired_rule = {});
 
+// ------------------------------------------- Arc 3: persistent fire-mask
+
+/** Persistent (rule, node) NO-FIRE memo ("magic math boards" rung 1).
+    Records rules that produced zero rewrites on a node, keyed by a
+    stable structural hash (FNV-1a over sstr), and skips re-firing them
+    in later runs. Proposal-side only: a hit suppresses a known-empty
+    fire; positives are never cached across runs, and verify_edge still
+    guards every emitted child — a stale mask (guarded further by the
+    rule-set fingerprint) can cost coverage, never soundness. All
+    functions are process-global and thread-safe. */
+void fire_mask_enable(const rule_set& rules);  // arm for this rule set
+/** Drop the in-memory per-(rule,node) memo on the calling thread's next
+    successors() call (tests; the persistent mask sits below it). */
+void successors_cache_clear();
+void fire_mask_reset();                        // disarm and clear
+bool fire_mask_load(const std::string& path, const rule_set& rules);
+bool fire_mask_save(const std::string& path);
+std::size_t fire_mask_size();
+std::size_t fire_mask_hits();
+/** successors() integration: returns true when (rule, node) is a known
+    no-fire; records observed no-fires when armed. */
+bool fire_mask_check(const std::string& rule_name, const expr& node);
+void fire_mask_record(const std::string& rule_name, const expr& node);
+
 /** Thread-local verbalized-derivation slot for ansatz rules (the
     DERIV_TRACE analogue; no global mutable state). Armed by annotate()
     around a re-fire of the ansatz rule. */
