@@ -213,4 +213,136 @@ PYBIND11_MODULE(axiom_sym, m) {
       "bridge slots (llmopt axiom_slots contract). Returns {solved, "
       "answer, history, nodes, expired}. Every emitted answer passed "
       "edge-level verification (verify_p=1).");
+
+  // ----------------------------------------------------- chain emission
+  // Phase D over the bridge: solve, then replay the winning chain and
+  // annotate every step, returning farm-shard rows. With slots supplied
+  // the hybrid-solved roots emit too — external rules appear in chain
+  // labels and in each row's hints, exactly as in llmopt's own farm.
+  m.def(
+      "emit_chain",
+      [](const sym::expr& root, int level, long long budget, int plies,
+         int width, const std::string& prior_tsv, py::object heurisch,
+         py::object equivalence, long long deadline_ms) {
+        namespace se = ax::search;
+        se::rule_set rules = se::default_rules();
+        if (!heurisch.is_none()) {
+          rules.external.int_rules.emplace_back(
+              "i_heurisch",
+              [heurisch](const sym::expr& node) -> std::vector<sym::expr> {
+                py::gil_scoped_acquire gil;
+                std::vector<sym::expr> out;
+                try {
+                  const py::object res = heurisch(to_sstr(node));
+                  for (const auto& item : res.cast<py::list>())
+                    out.push_back(sym::parse(item.cast<std::string>()));
+                } catch (...) {
+                  out.clear();
+                }
+                return out;
+              });
+        }
+        if (!equivalence.is_none()) {
+          rules.external.equivalence =
+              [equivalence](const sym::expr& a, const sym::expr& b) -> bool {
+            py::gil_scoped_acquire gil;
+            try {
+              return equivalence(to_sstr(a), to_sstr(b))
+                         .cast<std::string>() == "EQUIVALENT";
+            } catch (...) {
+              return false;
+            }
+          };
+        }
+        se::beam_options opt;
+        opt.width = width;
+        opt.max_plies = plies;
+        opt.max_nodes = budget;
+        opt.use_macros = true;
+        std::optional<se::markov_prior> prior;
+        if (!prior_tsv.empty()) {
+          prior = se::markov_prior::load_tsv(prior_tsv);
+          opt.proposer = prior->proposer();
+          opt.propose_k = 3;
+        }
+        if (deadline_ms > 0)
+          opt.deadline = std::chrono::steady_clock::now() +
+                         std::chrono::milliseconds(deadline_ms);
+        // rows built without the GIL; each is (cur, nxt, source, hints,
+        // think-or-empty, think_present) so no py:: object is created
+        // while the GIL is released.
+        struct row {
+          std::string cur, nxt, source, think;
+          std::vector<std::string> hints;
+          bool has_think = false;
+        };
+        std::vector<row> rows;
+        long long dropped = 0;
+        bool solved = false, replay_ok = true;
+        {
+          py::gil_scoped_release run_without_gil;
+          const auto res = se::beam_search(root, rules, opt);
+          solved = res.solved;
+          if (res.solved) {
+            const auto chain =
+                se::replay_chain(root, res.best.history, rules);
+            if (!chain) {
+              replay_ok = false;
+            } else {
+              const char* source = res.best.history.size() == 1
+                                       ? "axiom-oneply"
+                                       : "axiom-chain";
+              for (std::size_t i = 0; i + 1 < chain->size(); ++i) {
+                const sym::expr& cur = (*chain)[i].e;
+                const sym::expr& nxt = (*chain)[i + 1].e;
+                if (!se::verify_edge(cur, nxt, rules.external)) {
+                  ++dropped;
+                  continue;
+                }
+                const std::string& label = res.best.history[i];
+                const auto ann = se::annotate(
+                    cur, rules, label.substr(0, label.find('@')));
+                row r;
+                r.cur = to_sstr(cur);
+                r.nxt = to_sstr(nxt);
+                r.source = source;
+                r.hints = ann.hints;
+                r.has_think = ann.think.has_value();
+                if (ann.think) r.think = *ann.think;
+                rows.push_back(std::move(r));
+              }
+            }
+          }
+        }
+        py::list out_rows;
+        for (const row& r : rows) {
+          py::dict d;
+          d["cur"] = r.cur;
+          d["nxt"] = r.nxt;
+          d["level"] = level;
+          d["source"] = r.source;
+          d["hints"] = r.hints;
+          d["think"] = r.has_think ? py::cast(r.think) : py::none();
+          out_rows.append(d);
+        }
+        py::dict out;
+        out["solved"] = solved;
+        out["rows"] = out_rows;
+        out["dropped_pairs"] = dropped;
+        out["replay_ok"] = replay_ok;
+        return out;
+      },
+      py::arg("root"), py::arg("level"), py::arg("budget") = 200,
+      py::arg("plies") = 24, py::arg("width") = 3,
+      py::arg("prior_tsv") = std::string(),
+      py::arg("heurisch") = py::none(),
+      py::arg("equivalence") = py::none(), py::arg("deadline_ms") = 20000,
+      "Solve Integral(f, x) and emit the winning chain as farm-shard "
+      "rows: {cur, nxt, level, source, hints, think} per llmopt's "
+      "farm_v22 schema. Slots are the axiom_slots contract, so "
+      "hybrid-solved roots emit too. Every pair is re-verified through "
+      "verify_edge; rejected pairs are dropped and counted "
+      "(dropped_pairs), never written. replay_ok=False means the "
+      "winning history did not replay — the root is skipped, not "
+      "guessed.");
 }

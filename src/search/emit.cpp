@@ -96,6 +96,19 @@ annotation annotate(const expr& cur, const rule_set& rules,
   if (!node) return out;
   for (const auto& [name, fn] : rules.integral)
     if (!fn(*node).empty()) out.hints.push_back(name);
+  // external slots are part of llmopt's INT_RULES (i_heurisch sits in
+  // their list), so they belong in the hints vocabulary too — omitting
+  // them would make native rows' hint distribution differ from
+  // sympy-farmed rows for the same node. Probed last; slot failures are
+  // conservative (no hint), same as in search.
+  for (const auto& [name, fn] : rules.external.int_rules) {
+    bool fired = false;
+    try {
+      fired = !fn(*node).empty();
+    } catch (const std::exception&) {
+    }
+    if (fired) out.hints.push_back(name);
+  }
   if (fired_rule == "i_linear_basis" || fired_rule == "i_sqrt_basis") {
     for (const auto& [name, fn] : rules.integral)
       if (name == fired_rule) {

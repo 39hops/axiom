@@ -96,5 +96,50 @@ def _crashing(node_sstr):
 r = ax.solve(ax.parse_sstr("Integral(x**2, x)"), heurisch=_crashing)
 check("crashing slot survives conservatively", r["solved"])
 
+# ---- chain emission over the bridge (Phase D)
+
+r = ax.emit_chain(ax.parse_sstr("Integral(21*x**2 + 9, x)"), 1)
+rows = r["rows"]
+check("emit_chain solves and emits", r["solved"] and len(rows) >= 2)
+check("emit_chain schema exact",
+      all(set(row) == {"cur", "nxt", "level", "source", "hints", "think"}
+          for row in rows))
+check("emit_chain drops nothing on a clean chain",
+      r["dropped_pairs"] == 0 and r["replay_ok"])
+check("emit_chain source tagged",
+      all(row["source"] in ("axiom-chain", "axiom-oneply") for row in rows))
+# every emitted state must round-trip the parser (rows are training text;
+# an unparseable row would poison a shard). Value-level checking already
+# happened C++-side: verify_edge gates every pair before it is emitted.
+ok = True
+for row in rows:
+    for side in ("cur", "nxt"):
+        try:
+            ax.parse_sstr(row[side])
+        except ValueError:
+            ok = False
+check("emit_chain rows round-trip the parser", ok)
+# the chain must actually be a chain: each nxt is the following cur
+check("emit_chain rows are contiguous",
+      all(rows[i]["nxt"] == rows[i + 1]["cur"] for i in range(len(rows) - 1)))
+
+# slot-served hints reach the rows (hybrid emission path)
+seen_slot = []
+def _slot_heurisch(node_sstr):
+    seen_slot.append(node_sstr)
+    return ["x/2 - sin(x)*cos(x)/2"] if "sin(x)**2" in node_sstr else []
+r = ax.emit_chain(ax.parse_sstr("Integral(sin(x)**2, x)"), 6, budget=100,
+                  heurisch=_slot_heurisch)
+check("emit_chain hybrid path emits",
+      r["solved"] and len(r["rows"]) >= 1 and len(seen_slot) >= 1)
+check("emit_chain hints carry the slot",
+      any("i_heurisch" in row["hints"] for row in r["rows"]))
+
+def _emit_crash(node_sstr):
+    raise RuntimeError("boom")
+r = ax.emit_chain(ax.parse_sstr("Integral(x**2, x)"), 1,
+                  heurisch=_emit_crash)
+check("emit_chain survives a crashing slot", r["solved"])
+
 print(f"\n{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)
