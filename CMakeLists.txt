@@ -43,6 +43,7 @@ add_library(axiom STATIC
   src/search/rules2.cpp
   src/search/rules3.cpp
   src/search/engine.cpp
+  src/search/emit.cpp
   src/pyrand/sha512.cpp
   src/pyrand/pyrand.cpp
   src/mathgen/problems.cpp
@@ -80,3 +81,6 @@ option(AXIOM_BUILD_BENCH "Build benchmarks" ON)
 if(AXIOM_BUILD_BENCH)
   add_subdirectory(bench)
 endif()
+
+add_executable(axiom-chain-emit tools/chain_emit_main.cpp)
+target_link_libraries(axiom-chain-emit PRIVATE axiom)

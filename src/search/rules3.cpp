@@ -6,6 +6,7 @@
 #include <ax/sym/integrate.hpp>
 #include <ax/sym/oracle.hpp>
 #include <ax/sym/poly.hpp>
+#include <ax/sym/print_sstr.hpp>
 
 #include <algorithm>
 #include <map>
@@ -617,6 +618,17 @@ std::vector<expr> i_linear_basis(const expr& node) {
         a = a + expr::num(c) * x.pow(expr::num(j)) * mons[i];
     }
   if (is_zero_num(a)) return {};
+  {
+    std::string msg =
+        "ansatz sum of c_ij * x^j * m_i over basis {";
+    for (std::size_t i = 0; i < mons.size() && i < 8; ++i) {
+      if (i) msg += ", ";
+      msg += sym::to_sstr(mons[i]);
+    }
+    if (mons.size() > 8) msg += ", ...";
+    msg += "}; differentiate and equate coefficients";
+    deriv_trace_push(msg);
+  }
   return {a};
 }
 

@@ -5,6 +5,7 @@
 #include <ax/sym/expand.hpp>
 #include <ax/sym/oracle.hpp>
 #include <ax/sym/poly.hpp>
+#include <ax/sym/print_sstr.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -645,6 +646,11 @@ std::vector<expr> i_sqrt_basis(const expr& node) {
     }
     const expr ans = (a_e + b_e * Lg) * expr::fn("sqrt", P_e);
     if (ans.is_num() && ans.value() == kZero) return {};
+    deriv_trace_push("ansatz (A(x) + B(x)*log(" +
+                     sym::to_sstr(Lg.args()[0]) + "))*sqrt(" +
+                     sym::to_sstr(P_e) +
+                     ") with polynomial A, B; differentiate, clear by"
+                     " 2*sqrt(P)*q, match coefficients");
     return {ans};
   }
   const int degA = std::max(h.degree() - P.degree() + 1, 0) + 1;
@@ -657,6 +663,9 @@ std::vector<expr> i_sqrt_basis(const expr& node) {
     if (!(c == kZero)) a_e = a_e + expr::num(c) * x.pow(expr::num(k));
   }
   if (a_e.is_num() && a_e.value() == kZero) return {};
+  deriv_trace_push("ansatz A(x)*sqrt(" + sym::to_sstr(P_e) +
+                   ") with polynomial A;"
+                   " match 2*A'*P + A*P' = 2*f*sqrt(P) in the poly ring");
   return {a_e * expr::fn("sqrt", P_e)};
 }
 

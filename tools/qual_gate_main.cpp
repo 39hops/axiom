@@ -29,6 +29,9 @@ int main(int argc, char** argv) {
   const int width = argc > 5 ? std::atoi(argv[5]) : 8;
   std::optional<search::markov_prior> prior;
   if (argc > 6) prior = search::markov_prior::load_tsv(argv[6]);
+  // per-root wall in seconds (arg 8); 20s is the priced default, 60s is
+  // the expiry-pricing protocol
+  const int deadline_s = argc > 7 ? std::atoi(argv[7]) : 20;
 
   std::ifstream in(argv[1]);
   if (!in.good()) {
@@ -52,7 +55,7 @@ int main(int argc, char** argv) {
     // root that exceeds its deadline; an aborted root is an honest
     // unsolved, never a hung gate
     const auto deadline =
-        std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        std::chrono::steady_clock::now() + std::chrono::seconds(deadline_s);
     opt.deadline = deadline;
     opt.width = width;
     opt.max_plies = plies;

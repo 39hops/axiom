@@ -166,6 +166,35 @@ bool replay_verify(
 search_result beam_search(const expr& root, const rule_set& rules,
                           const beam_options& opt = {});
 
+// ----------------------------------------------- Phase D: chain emission
+
+/** replay_verify's walk, returning the full state sequence root..answer
+    (history.size() + 1 states) instead of a bool; nullopt when the
+    history does not replay (same-label backtracking, verify_p = 1). */
+std::optional<std::vector<state>> replay_chain(
+    const expr& root, const std::vector<std::string>& history,
+    const rule_set& rules,
+    std::optional<std::chrono::steady_clock::time_point> deadline = {});
+
+/** Farm-row annotation (llmopt expert_iter_steps.py annotate): hints =
+    names of integral rules that fire on the largest Integral node of
+    cur (count_ops-largest, registry order); think = the fired ansatz
+    rule's verbalized derivation (i_linear_basis / i_sqrt_basis only),
+    matching llmopt's _trace message conventions byte-for-byte. */
+struct annotation {
+  std::vector<std::string> hints;
+  std::optional<std::string> think;
+};
+annotation annotate(const expr& cur, const rule_set& rules,
+                    const std::string& fired_rule = {});
+
+/** Thread-local verbalized-derivation slot for ansatz rules (the
+    DERIV_TRACE analogue; no global mutable state). Armed by annotate()
+    around a re-fire of the ansatz rule. */
+void deriv_trace_arm();
+std::optional<std::string> deriv_trace_take();
+void deriv_trace_push(const std::string& msg);
+
 // ----------------------------------------------------------------- engine
 
 /** Rule-bigram prior (llmopt's zero-NN 316/360 brain). Loaded from the
