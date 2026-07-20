@@ -86,3 +86,6 @@ endif()
 
 add_executable(axiom-chain-emit tools/chain_emit_main.cpp)
 target_link_libraries(axiom-chain-emit PRIVATE axiom)
+
+add_executable(axiom-ode-sample tools/ode_sample_main.cpp)
+target_link_libraries(axiom-ode-sample PRIVATE axiom)
