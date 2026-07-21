@@ -49,6 +49,7 @@ add_executable(ax_tests
   sym/jsonl_test.cpp
   sym/print_sstr_test.cpp
   sym/count_ops_test.cpp
+  sym/series_test.cpp
   pyrand/pyrand_test.cpp
   mathgen/expression_test.cpp
   mathgen/ode_test.cpp

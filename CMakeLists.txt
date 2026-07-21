@@ -36,6 +36,8 @@ add_library(axiom STATIC
   src/sym/harness.cpp
   src/sym/print_sstr.cpp
   src/sym/count_ops.cpp
+  src/sym/series.cpp
+  src/sym/series_oracle.cpp
   src/search/verify.cpp
   src/search/successors.cpp
   src/search/beam.cpp
@@ -49,6 +51,7 @@ add_library(axiom STATIC
   src/pyrand/pyrand.cpp
   src/mathgen/problems.cpp
   src/mathgen/ode.cpp
+  src/mathgen/series_solve.cpp
 )
 target_include_directories(axiom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(axiom PUBLIC cxx_std_23)
@@ -89,3 +92,6 @@ target_link_libraries(axiom-chain-emit PRIVATE axiom)
 
 add_executable(axiom-ode-sample tools/ode_sample_main.cpp)
 target_link_libraries(axiom-ode-sample PRIVATE axiom)
+
+add_executable(axiom-series-sample tools/series_sample_main.cpp)
+target_link_libraries(axiom-series-sample PRIVATE axiom)
