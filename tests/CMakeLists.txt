@@ -51,6 +51,7 @@ add_executable(ax_tests
   sym/count_ops_test.cpp
   sym/series_test.cpp
   mathgen/series_chain_test.cpp
+  mathgen/domain_chain_test.cpp
   pyrand/pyrand_test.cpp
   mathgen/expression_test.cpp
   mathgen/ode_test.cpp
