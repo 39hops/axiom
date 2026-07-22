@@ -2,16 +2,19 @@
     certified rewrite rows (llmopt relay 2026-07-22: single-shot arithmetic
     is simulation; decomposed steps train up).
     Usage:
-      axiom-series-chain <out.jsonl> [seeds_per_cell] [order]
-    For each certified L9b problem, every recurrence step a_m emits up to
-    three rows, all inside the vocab-40 charset (digits x + - * / ( ) ,
-    space; no letters beyond function atoms, no '='):
-      kind "sum"    cur = the recurrence products spelled term by term
-                    nxt = their folded exact value      (terms >= 2 only)
+      axiom-series-chain <out.jsonl> [seeds_per_cell] [order] [cc2_seeds]
+    For each certified L9b problem, every recurrence step a_m emits rows,
+    all inside the vocab-40 charset (digits x + - * / ( ) , space; no
+    letters beyond function atoms, no '='). Rung 7: the recurrence sum is
+    a pairwise reduction tree, one primitive per emission:
+      kind "mul"    cur = one binary product        nxt = its value
+      kind "add"    cur = one binary addition       nxt = its value
       kind "solve"  cur = (q_n - S)/divisor, everything a literal
                     nxt = a_m
       kind "append" cur = partial sum through a_{m-1} + O() marker
                     nxt = partial sum through a_m   + O() marker
+    cc2_seeds (default = seeds_per_cell) oversamples the ode_cc2 family
+    where two-back placement lags.
     Certification: each arithmetic row's cur is re-parsed by the engine
     (sym::parse -> canonical) and must fold byte-exactly to nxt; nxt is
     printed through to_sstr(expr::num(...)) so it IS the canonical
@@ -64,6 +67,7 @@ int main(int argc, char** argv) {
   }
   const long long seeds = argc > 2 ? std::atoll(argv[2]) : 20;
   const int order = argc > 3 ? std::atoi(argv[3]) : 8;
+  const long long cc2_seeds = argc > 4 ? std::atoll(argv[4]) : seeds;
   std::ofstream out(argv[1]);
   if (!out.good()) {
     std::cerr << "cannot open " << argv[1] << "\n";
@@ -73,9 +77,10 @@ int main(int argc, char** argv) {
   long long problems = 0, ok = 0, rows = 0, cert_fail = 0;
   const char* fams[] = {"ode_linear1", "ode_cc2", "ode_separable"};
   for (const char* fam : fams)
-    for (int level = 1; level <= 3; ++level)
-      for (long long seed = 0; seed < seeds; ++seed) {
-        const std::string f(fam);
+    for (int level = 1; level <= 3; ++level) {
+      const std::string f(fam);
+      const long long fam_seeds = f == "ode_cc2" ? cc2_seeds : seeds;
+      for (long long seed = 0; seed < fam_seeds; ++seed) {
         const mathgen::ode_problem p =
             f == "ode_linear1"
                 ? mathgen::make_linear_first_order(level, seed)
@@ -117,9 +122,9 @@ int main(int argc, char** argv) {
           };
           for (const auto& st : sol.steps) {
             const auto d = mathgen::derivation_rows(st);
-            if (d.sum_cur)
-              emit(st.n, "sum", st.a_n, *d.sum_cur, d.sum_nxt,
-                   folds_to(*d.sum_cur, d.sum_nxt));
+            for (const auto& r : d.reduction)
+              emit(st.n, r.kind.c_str(), st.a_n, r.cur, r.nxt,
+                   folds_to(r.cur, r.nxt));
             emit(st.n, "solve", st.a_n, d.solve_cur, d.solve_nxt,
                  folds_to(d.solve_cur, d.solve_nxt));
             emit(st.n, "append", st.a_n,
@@ -136,6 +141,7 @@ int main(int argc, char** argv) {
         }
         if (verdict == "EQUIVALENT_TO_ORDER") ++ok;
       }
+    }
   std::cerr << "== " << problems << " problems, " << ok
             << " EQUIVALENT_TO_ORDER, " << rows << " rows, " << cert_fail
             << " cert failures\n";

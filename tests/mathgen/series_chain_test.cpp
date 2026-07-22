@@ -50,27 +50,36 @@ TEST(SeriesChain, SingleTermStepSpellsTheRelayExample) {
   st.divisor = q(2);
   st.terms = {{q(-2), q(1), q(-6)}};
   const auto d = ax::mathgen::derivation_rows(st);
-  EXPECT_FALSE(d.sum_cur.has_value());
+  EXPECT_TRUE(d.reduction.empty());
   EXPECT_EQ(d.solve_cur, "(0 - (-2)*(-6))/2");
   EXPECT_EQ(d.solve_nxt, "-6");
   EXPECT_EQ(fold(d.solve_cur), d.solve_nxt);
 }
 
-TEST(SeriesChain, MultiTermStepEmitsSumRowThenSolveRow) {
+TEST(SeriesChain, MultiTermStepReducesPairwise) {
+  // relay example: (-6)*12 + (-1)*2*3 as one primitive per row
   ax::mathgen::series_step st;
   st.n = 3;
-  st.a_n = q(-1, 2);
-  st.q_n = q(1);
-  st.divisor = q(6);
-  st.terms = {{q(2), q(1), q(1)}, {q(1, 2), q(2), q(2)}};
+  st.a_n = q(-13);
+  st.q_n = q(0);
+  st.divisor = q(-6);
+  st.terms = {{q(-6), q(1), q(12)}, {q(-1), q(2), q(3)}};
   const auto d = ax::mathgen::derivation_rows(st);
-  ASSERT_TRUE(d.sum_cur.has_value());
-  EXPECT_EQ(*d.sum_cur, "2 + (1/2)*2*2");
-  EXPECT_EQ(d.sum_nxt, "4");
-  EXPECT_EQ(fold(*d.sum_cur), d.sum_nxt);
-  EXPECT_EQ(d.solve_cur, "(1 - 4)/6");
+  ASSERT_EQ(d.reduction.size(), 4u);
+  EXPECT_EQ(d.reduction[0].kind, "mul");
+  EXPECT_EQ(d.reduction[0].cur, "(-6)*12");
+  EXPECT_EQ(d.reduction[0].nxt, "-72");
+  EXPECT_EQ(d.reduction[1].cur, "(-1)*2");
+  EXPECT_EQ(d.reduction[1].nxt, "-2");
+  EXPECT_EQ(d.reduction[2].cur, "(-2)*3");
+  EXPECT_EQ(d.reduction[2].nxt, "-6");
+  EXPECT_EQ(d.reduction[3].kind, "add");
+  EXPECT_EQ(d.reduction[3].cur, "-72 + (-6)");
+  EXPECT_EQ(d.reduction[3].nxt, "-78");
+  for (const auto& r : d.reduction) EXPECT_EQ(fold(r.cur), r.nxt) << r.cur;
+  EXPECT_EQ(d.solve_cur, "(0 - (-78))/(-6)");
   EXPECT_EQ(fold(d.solve_cur), d.solve_nxt);
-  EXPECT_EQ(d.solve_nxt, "-1/2");
+  EXPECT_EQ(d.solve_nxt, "-13");
 }
 
 TEST(SeriesChain, EveryRowOfEveryFamilyCertifiesAndStaysInVocab) {
@@ -86,9 +95,9 @@ TEST(SeriesChain, EveryRowOfEveryFamilyCertifiesAndStaysInVocab) {
         const auto sol = series_solve(p, order);
         for (const auto& st : sol.steps) {
           const auto d = derivation_rows(st);
-          if (d.sum_cur) {
-            EXPECT_TRUE(vocab40(*d.sum_cur)) << *d.sum_cur;
-            EXPECT_EQ(fold(*d.sum_cur), d.sum_nxt) << *d.sum_cur;
+          for (const auto& r : d.reduction) {
+            EXPECT_TRUE(vocab40(r.cur)) << r.cur;
+            EXPECT_EQ(fold(r.cur), r.nxt) << r.cur;
           }
           EXPECT_TRUE(vocab40(d.solve_cur)) << d.solve_cur;
           EXPECT_EQ(fold(d.solve_cur), d.solve_nxt) << d.solve_cur;
