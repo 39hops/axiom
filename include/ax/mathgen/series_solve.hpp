@@ -12,9 +12,23 @@
 
 namespace ax::mathgen {
 
+/** One contributing product c * fall * a of the recurrence sum for a
+    step: c is the series coefficient of c_i(x), fall the falling
+    factorial from differentiating x^m i times, a the earlier series
+    coefficient it multiplies. All exact rationals so the arithmetic can
+    be re-emitted as certifiable rewrite rows. */
+struct series_term {
+  rational c;
+  rational fall;
+  rational a;
+};
+
 struct series_step {
   int n = 0;      ///< coefficient index produced (a_n)
   rational a_n;   ///< its exact value
+  rational q_n;      ///< forcing coefficient q_n on the rhs
+  rational divisor;  ///< c_k[0] * fall(n, k): a_n == (q - sum)/divisor
+  std::vector<series_term> terms;  ///< the recurrence sum, term by term
 };
 
 struct series_solution {

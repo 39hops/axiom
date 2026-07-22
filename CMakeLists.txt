@@ -52,6 +52,7 @@ add_library(axiom STATIC
   src/mathgen/problems.cpp
   src/mathgen/ode.cpp
   src/mathgen/series_solve.cpp
+  src/mathgen/series_chain.cpp
 )
 target_include_directories(axiom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(axiom PUBLIC cxx_std_23)
@@ -95,3 +96,6 @@ target_link_libraries(axiom-ode-sample PRIVATE axiom)
 
 add_executable(axiom-series-sample tools/series_sample_main.cpp)
 target_link_libraries(axiom-series-sample PRIVATE axiom)
+
+add_executable(axiom-series-chain tools/series_chain_main.cpp)
+target_link_libraries(axiom-series-chain PRIVATE axiom)

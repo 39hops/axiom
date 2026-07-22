@@ -115,20 +115,24 @@ series_solution series_solve(const ode_problem& p, int order) {
   out.ode_order = k;
   for (int n = 0; n + k < order; ++n) {
     rational sum;
+    std::vector<series_term> terms;
     for (int i = 0; i <= k; ++i)
       for (int j = 0; j <= n; ++j) {
         if (i == k && j == 0) continue;  // that's the unknown a_{n+k}
         const rational& cij = c[static_cast<std::size_t>(i)].coeff(
             static_cast<std::size_t>(j));
         if (cij.is_zero()) continue;
-        sum = sum + cij * fall(n - j + i, i) *
-                        a[static_cast<std::size_t>(n - j + i)];
+        const rational fl = fall(n - j + i, i);
+        const rational& aj = a[static_cast<std::size_t>(n - j + i)];
+        sum = sum + cij * fl * aj;
+        terms.push_back({cij, fl, aj});
       }
     const int m = n + k;
-    const rational am =
-        (qs.coeff(static_cast<std::size_t>(n)) - sum) / (top * fall(m, k));
+    const rational qn = qs.coeff(static_cast<std::size_t>(n));
+    const rational div = top * fall(m, k);
+    const rational am = (qn - sum) / div;
     a[static_cast<std::size_t>(m)] = am;
-    out.steps.push_back({m, am});
+    out.steps.push_back({m, am, qn, div, std::move(terms)});
   }
   out.y = series(std::move(a), order);
   return out;
