@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cctype>
 #include <string>
 
@@ -39,7 +40,7 @@ TEST(DomainChain, GcdChainsCertifyAcrossSeeds) {
 TEST(DomainChain, GcdChainEndsAtEngineGcd) {
   const auto p = ax::mathgen::make_gcd_chain(1, 0);
   ASSERT_TRUE(p.certified) << p.error;
-  EXPECT_EQ(p.rows.front().kind, "divstep");
+  EXPECT_EQ(p.rows.front().kind, "pmul");  // division steps are trees now
 }
 
 TEST(DomainChain, PartialFractionsCertifyAcrossSeeds) {
@@ -48,13 +49,24 @@ TEST(DomainChain, PartialFractionsCertifyAcrossSeeds) {
       check_problem(ax::mathgen::make_pf_chain(level, seed), 'x');
 }
 
-TEST(DomainChain, PartialFractionRowOrderIsNumDenResPerRoot) {
+TEST(DomainChain, PartialFractionRowsAreOnePrimitiveEach) {
   const auto p = ax::mathgen::make_pf_chain(1, 0);
   ASSERT_TRUE(p.certified) << p.error;
-  ASSERT_EQ(p.rows.size(), 7u);  // 2 roots x (num, den, res) + assemble
-  EXPECT_EQ(p.rows[0].kind, "num");
-  EXPECT_EQ(p.rows[1].kind, "den");
-  EXPECT_EQ(p.rows[2].kind, "res");
+  int res = 0, pmul = 0;
+  for (const auto& r : p.rows) {
+    if (r.kind == "res") ++res;
+    if (r.kind == "pmul") ++pmul;
+    if (r.kind == "mul" || r.kind == "add" || r.kind == "sub")
+      // one binary operator per constant-primitive row
+      EXPECT_LE(std::count_if(r.cur.begin(), r.cur.end(),
+                              [](char c) {
+                                return c == '*' || c == '+';
+                              }),
+                2)
+          << r.cur;
+  }
+  EXPECT_EQ(res, 2);   // one residue per root
+  EXPECT_EQ(pmul, 2);  // one recombination product per root (2 roots)
   EXPECT_EQ(p.rows.back().kind, "assemble");
 }
 

@@ -61,10 +61,22 @@ poly integrate_stage(pchain_problem& out, const poly& src,
       out.error = "int row failed engine certification";
     }
     out.rows.push_back({"int", cur, nxt});
-    const poly grown =
-        partial + poly::from_expr(sym::parse(nxt), kT);
-    out.rows.push_back({"append", sym::to_sstr(partial.to_expr(kT)),
-                        sym::to_sstr(grown.to_expr(kT))});
+    // fold spelling (llmopt 2026-07-23: cur must determine nxt) — the
+    // integrated term and the running partial are both in the string
+    const poly grown = partial + poly::from_expr(sym::parse(nxt), kT);
+    const std::string acur = "(" + nxt + ") + (" +
+                             sym::to_sstr(partial.to_expr(kT)) + ")";
+    bool ok = false;
+    try {
+      ok = poly::from_expr(sym::expand(sym::parse(acur)), kT) == grown;
+    } catch (const std::exception&) {
+    }
+    if (!ok) {
+      out.certified = false;
+      out.error = "append fold failed engine certification";
+    }
+    out.rows.push_back(
+        {"append", acur, sym::to_sstr(grown.to_expr(kT))});
     partial = grown;
   }
   return poly(std::move(anti));
