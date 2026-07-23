@@ -70,6 +70,24 @@ TEST(DomainChain, PartialFractionRowsAreOnePrimitiveEach) {
   EXPECT_EQ(p.rows.back().kind, "assemble");
 }
 
+TEST(DomainChain, BridgeChainsCertifyAcrossSeeds) {
+  for (int level = 1; level <= 3; ++level)
+    for (long long seed = 0; seed < 10; ++seed) {
+      const auto p = ax::mathgen::make_bridge_chain(level, seed);
+      EXPECT_TRUE(p.certified) << p.family << " L" << level << " seed "
+                               << seed << ": " << p.error;
+      int ibridge = 0, iclose = 0, close = 0;
+      for (const auto& r : p.rows) {
+        if (r.kind == "ibridge") ++ibridge;
+        if (r.kind == "iclose") ++iclose;
+        if (r.kind == "close") ++close;
+      }
+      EXPECT_EQ(ibridge, 1);
+      EXPECT_EQ(close, 1);
+      EXPECT_EQ(iclose, level >= 2 ? 3 : 2);
+    }
+}
+
 TEST(DomainChain, KinematicsChainsCertifyAcrossSeeds) {
   for (int level = 1; level <= 3; ++level)
     for (long long seed = 0; seed < 10; ++seed)

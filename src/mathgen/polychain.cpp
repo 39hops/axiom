@@ -11,6 +11,7 @@
 
 #include <ax/mathgen/series_chain.hpp>
 #include <ax/pyrand/pyrand.hpp>
+#include <ax/search/search.hpp>
 #include <ax/sym/expand.hpp>
 #include <ax/sym/parse.hpp>
 #include <ax/sym/poly.hpp>
@@ -90,6 +91,39 @@ rational add_fold(pchain_problem& out, const std::vector<rational>& v) {
   return acc;
 }
 
+/** Termwise precursors (llmopt 2026-07-23 postscript: operand
+    complexity is a second axis — p-kind rows get their coefficient
+    arithmetic emitted first as constant primitives, so the poly row
+    is an assembly of already-derived facts). */
+void termwise_mul(pchain_problem& out, const rational& c, const poly& p) {
+  if (c == kOne) return;  // nothing to derive
+  for (int j = 0; j <= p.degree(); ++j) {
+    const rational& pj = p.coeff(static_cast<std::size_t>(j));
+    if (pj.is_zero() || pj == kOne) continue;
+    arith_row(out, "mul", chain_lit(c) + "*" + chain_lit(pj), c * pj);
+  }
+}
+
+void termwise_sub(pchain_problem& out, const poly& a, const poly& b) {
+  const int deg = a.degree() > b.degree() ? a.degree() : b.degree();
+  for (int j = 0; j <= deg; ++j) {
+    const rational& aj = a.coeff(static_cast<std::size_t>(j));
+    const rational& bj = b.coeff(static_cast<std::size_t>(j));
+    if (aj.is_zero() || bj.is_zero()) continue;  // copies, not facts
+    arith_row(out, "sub", aj.to_string() + " - " + chain_lit(bj), aj - bj);
+  }
+}
+
+void termwise_add(pchain_problem& out, const poly& a, const poly& b) {
+  const int deg = a.degree() > b.degree() ? a.degree() : b.degree();
+  for (int j = 0; j <= deg; ++j) {
+    const rational& aj = a.coeff(static_cast<std::size_t>(j));
+    const rational& bj = b.coeff(static_cast<std::size_t>(j));
+    if (aj.is_zero() || bj.is_zero()) continue;
+    arith_row(out, "add", aj.to_string() + " + " + chain_lit(bj), aj + bj);
+  }
+}
+
 poly draw_poly(pyrand::python_random& rng, int degree) {
   std::vector<rational> c(static_cast<std::size_t>(degree) + 1);
   for (int i = 0; i < degree; ++i)
@@ -131,9 +165,11 @@ pchain_problem make_gcd_chain(int level, long long seed) {
         mc[static_cast<std::size_t>(k)] = qk;
         const poly mono(std::move(mc));
         const poly prod = mono * r1;
+        termwise_mul(out, qk, r1);
         poly_row(out, "pmul",
                  "(" + psstr(mono) + ")*(" + psstr(r1) + ")", prod);
         const poly next = acc - prod;
+        termwise_sub(out, acc, prod);
         poly_row(out, "psub",
                  "(" + psstr(acc) + ") - (" + psstr(prod) + ")", next);
         acc = next;
@@ -169,8 +205,17 @@ pchain_problem make_gcd_chain(int level, long long seed) {
   return out;
 }
 
-pchain_problem make_pf_chain(int level, long long seed) {
-  pyrand::python_random rng("ppf-" + std::to_string(level) + "-" +
+namespace {
+
+/** Shared partial-fraction chain builder (poly_pf and the ibridge
+    family draw identically but under different rng tags, so their
+    problem populations are independent). */
+pchain_problem pf_build(const std::string& family, const std::string& tag,
+                        int level, long long seed,
+                        std::vector<rational>& roots_out,
+                        std::vector<rational>& residues_out,
+                        poly& num_out) {
+  pyrand::python_random rng(tag + "-" + std::to_string(level) + "-" +
                             std::to_string(seed));
   const std::size_t nroots = level >= 2 ? 3 : 2;
   // distinct roots without replacement from {-3..3}
@@ -188,9 +233,11 @@ pchain_problem make_pf_chain(int level, long long seed) {
   nc[nroots - 1] = rational(bigint(rng.randint(1, 4)));
   const poly num(std::move(nc));
   for (const rational& a : roots)
-    if (num.eval(a).is_zero()) return make_pf_chain(level, seed + kReseed);
+    if (num.eval(a).is_zero())
+      return pf_build(family, tag, level, seed + kReseed, roots_out,
+                      residues_out, num_out);
 
-  pchain_problem out{"poly_pf", level, seed, {}, true, ""};
+  pchain_problem out{family, level, seed, {}, true, ""};
   std::vector<rational> residues;
   for (std::size_t i = 0; i < roots.size(); ++i) {
     // N(a) as a mul/add tree: per term, coefficient times root powers
@@ -232,6 +279,7 @@ pchain_problem make_pf_chain(int level, long long seed) {
       if (j == i) continue;
       const poly fac({rational() - roots[j], kOne});
       const poly grown = part * fac;
+      termwise_mul(out, rational() - roots[j], part);
       poly_row(out, "pmul",
                "(" + psstr(part) + ")*(" + psstr(fac) + ")", grown);
       part = grown;
@@ -241,6 +289,7 @@ pchain_problem make_pf_chain(int level, long long seed) {
   poly recon = parts.at(0);
   for (std::size_t i = 1; i < parts.size(); ++i) {
     const poly s = recon + parts[i];
+    termwise_add(out, recon, parts[i]);
     poly_row(out, "padd",
              "(" + psstr(recon) + ") + (" + psstr(parts[i]) + ")", s);
     recon = s;
@@ -267,6 +316,61 @@ pchain_problem make_pf_chain(int level, long long seed) {
     out.error = "assemble row failed engine certification";
   }
   out.rows.push_back({"assemble", cur, sum_str});
+  roots_out = roots;
+  residues_out = residues;
+  num_out = num;
+  return out;
+}
+
+}  // namespace
+
+pchain_problem make_pf_chain(int level, long long seed) {
+  std::vector<rational> roots, residues;
+  poly num;
+  return pf_build("poly_pf", "ppf", level, seed, roots, residues, num);
+}
+
+pchain_problem make_bridge_chain(int level, long long seed) {
+  std::vector<rational> roots, residues;
+  poly num;
+  pchain_problem out =
+      pf_build("poly_ibridge", "pbrg", level, seed, roots, residues, num);
+
+  // the bridge: Integral(N/D, x) -> sum Integral(r_i/(x - a_i), x),
+  // then each piece closes to r_i*log(x - a_i). Every edge certified by
+  // the farm-grade three-valued oracle (verify_edge, empty slots).
+  const search::external_slots ext{};
+  const auto edge_row = [&](const std::string& kind, const expr& parent,
+                            const expr& child) {
+    if (!search::verify_edge(parent, child, ext)) {
+      out.certified = false;
+      out.error = kind + " row failed verify_edge";
+    }
+    out.rows.push_back({kind, sym::to_sstr(parent), sym::to_sstr(child)});
+  };
+  expr den = kX - expr::num(roots[0]);
+  for (std::size_t i = 1; i < roots.size(); ++i)
+    den = den * (kX - expr::num(roots[i]));
+  const expr whole = expr::fn(
+      "Integral", std::vector<expr>{num.to_expr(kX) / den, kX});
+  std::vector<expr> pieces, antis;
+  for (std::size_t i = 0; i < roots.size(); ++i) {
+    const expr fac = kX - expr::num(roots[i]);
+    pieces.push_back(expr::fn(
+        "Integral",
+        std::vector<expr>{expr::num(residues[i]) / fac, kX}));
+    antis.push_back(expr::num(residues[i]) * expr::fn("log", fac));
+  }
+  expr split = pieces[0];
+  expr closed = antis[0];
+  for (std::size_t i = 1; i < pieces.size(); ++i) {
+    split = split + pieces[i];
+    closed = closed + antis[i];
+  }
+  edge_row("ibridge", whole, split);
+  for (std::size_t i = 0; i < pieces.size(); ++i)
+    edge_row("iclose", pieces[i], antis[i]);
+  edge_row("close", whole, closed);
   return out;
 }
 

@@ -1,9 +1,15 @@
 /** qual-gate: run the native solver over qualification roots and report
     per-level solve counts + per-root timing. Usage:
       axiom-qual-gate <roots.jsonl> [max_level] [budget] [plies] [width]
-                      [prior.tsv] [deadline_s] [firemask.tsv]
+                      [prior.tsv] [deadline_s] [firemask.tsv] [stuck.jsonl]
     Every reported solve is oracle-valid: diff-back equivalence + full
-    replay verification. Chains and misses stream to stdout as TSV. */
+    replay verification. Chains and misses stream to stdout as TSV.
+    stuck.jsonl (arg 10, PRACTICE MODE — Artin's design, llmopt relay
+    2026-07-23): when a search walls with progress, the best partial
+    state is APPENDED as a legal gate root ({id, level, root, from,
+    why, plies}), so a band is mined out only when its stuck-state
+    queue empties — re-farm the worklist deeper (bigger budget/slots)
+    before farming wider. */
 #include <ax/search/search.hpp>
 #include <ax/sym/calc.hpp>
 #include <ax/sym/count_ops.hpp>
@@ -28,20 +34,36 @@ int main(int argc, char** argv) {
   const long long budget = argc > 3 ? std::atoll(argv[3]) : 200;
   const int plies = argc > 4 ? std::atoi(argv[4]) : 12;
   const int width = argc > 5 ? std::atoi(argv[5]) : 8;
+  // positional args accept "-" or "" as absent (needed to reach the
+  // later worklist arg without a prior or fire-mask)
+  const auto given = [&](int i) {
+    return argc > i && argv[i][0] != '\0' &&
+           !(argv[i][0] == '-' && argv[i][1] == '\0');
+  };
   std::optional<search::markov_prior> prior;
-  if (argc > 6) prior = search::markov_prior::load_tsv(argv[6]);
+  if (given(6)) prior = search::markov_prior::load_tsv(argv[6]);
   // per-root wall in seconds (arg 8); 20s is the priced default, 60s is
   // the expiry-pricing protocol
   const int deadline_s = argc > 7 ? std::atoi(argv[7]) : 20;
   // fire-mask sidecar (arg 9): warm-start the persistent no-fire memo
   // and save the grown mask back at exit ("magic math boards" rung 1)
   std::string mask_path;
-  if (argc > 8) {
+  if (given(8)) {
     mask_path = argv[8];
     search::fire_mask_enable(search::default_rules());
     if (search::fire_mask_load(mask_path, search::default_rules()))
       std::cerr << "[fire-mask] warm start: "
                 << search::fire_mask_size() << " entries\n";
+  }
+
+  std::ofstream stuck_out;
+  long long stuck_rows = 0;
+  if (given(9)) {
+    stuck_out.open(argv[9], std::ios::app);
+    if (!stuck_out.good()) {
+      std::cerr << "cannot open stuck worklist " << argv[9] << "\n";
+      return 2;
+    }
   }
 
   std::ifstream in(argv[1]);
@@ -113,6 +135,20 @@ int main(int argc, char** argv) {
       // already fully verified in-search (replay exists for sampled mode)
     }
     if (ok) ++solved[level];
+    // practice mode: a WALLED search with progress leaves its best
+    // state on the worklist (a state that equals the root adds nothing;
+    // DIFFBACK-* rows are certification failures on solved shapes, not
+    // walls — nothing left to farm from them)
+    if (!res.solved && stuck_out.is_open() && !res.best.history.empty()) {
+      stuck_out << "{\"id\": \"" << sym::jsonl::escape(row.at("id"))
+                << "#s" << res.best.history.size() << "\", \"level\": "
+                << level << ", \"root\": \""
+                << sym::jsonl::escape(sym::to_sstr(res.best.e))
+                << "\", \"from\": \"" << sym::jsonl::escape(row.at("id"))
+                << "\", \"why\": \"" << why << "\", \"plies\": "
+                << res.best.history.size() << "}\n";
+      ++stuck_rows;
+    }
     std::cout << row.at("id") << "\t" << level << "\t" << why << "\t"
               << res.nodes << "\t" << dt << "\t"
               << (res.solved ? sym::to_sstr(res.best.e) : "-") << "\n";
@@ -121,6 +157,9 @@ int main(int argc, char** argv) {
             << wall_total << "s):\n";
   for (const auto& [lvl, tot] : total)
     std::cerr << "  L" << lvl << ": " << solved[lvl] << "/" << tot << "\n";
+  if (stuck_out.is_open())
+    std::cerr << "[practice] " << stuck_rows
+              << " stuck states appended to worklist\n";
   if (!mask_path.empty()) {
     search::fire_mask_save(mask_path);
     std::cerr << "[fire-mask] saved " << search::fire_mask_size()

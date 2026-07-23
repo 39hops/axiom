@@ -48,4 +48,14 @@ pchain_problem make_gcd_chain(int level, long long seed);
     construction (degenerate draws are reseeded). */
 pchain_problem make_pf_chain(int level, long long seed);
 
+/** Rational-integral bridge chains (llmopt transfer experiment,
+    2026-07-23): the full pf derivation rows (shared steps in context
+    are the transfer mechanism), then Integral(N/D, x) -> the residue
+    split ("ibridge"), each piece closed to r*log(x - a) ("iclose"),
+    and the whole integral closed ("close"). Integral-grammar rows are
+    certified by search::verify_edge — the same three-valued oracle
+    that guards farm chain emission. Draws under an independent rng
+    tag, so populations do not overlap poly_pf. */
+pchain_problem make_bridge_chain(int level, long long seed);
+
 }  // namespace ax::mathgen
