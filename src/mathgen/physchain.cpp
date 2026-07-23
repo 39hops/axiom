@@ -181,4 +181,137 @@ pchain_problem make_shm_chain(int level, long long seed, int order) {
   return out;
 }
 
+pchain_problem make_energy_chain(int level, long long seed, int order) {
+  pyrand::python_random rng("pnrg-" + std::to_string(level) + "-" +
+                            std::to_string(seed));
+  const long long w = level;
+  const long long y0i = rng.randint(-4, 4);
+  const long long v0i = rng.randint(-4, 4);
+  if (y0i == 0 && v0i == 0)
+    return make_energy_chain(level, seed + kReseed, order);
+  const expr x = expr::symbol("x");
+  const expr yfn = expr::fn("y", x);
+  const expr d2 = expr::fn("Derivative", std::vector<expr>{yfn, x, x});
+  const expr eq = expr::fn(
+      "Eq", std::vector<expr>{d2 + expr::num(w * w) * yfn, expr::num(0)});
+  const expr sol =
+      expr::num(y0i) * expr::fn("cos", expr::num(w) * x) +
+      expr::num(rational(bigint(v0i), bigint(w))) *
+          expr::fn("sin", expr::num(w) * x);
+  const ode_problem p{"phys_energy", level,
+                      eq,            sol,
+                      0,             rational(bigint(y0i)),
+                      rational(bigint(v0i))};
+
+  pchain_problem out{"phys_energy", level, seed, {}, true, ""};
+  const auto arith = [&](const std::string& kind, const std::string& cur,
+                         const rational& val) {
+    const std::string nxt = sym::to_sstr(expr::num(val));
+    bool ok = false;
+    try {
+      ok = sym::to_sstr(sym::parse(cur)) == nxt;
+    } catch (const std::exception&) {
+    }
+    if (!ok) {
+      out.certified = false;
+      out.error = kind + " row failed engine certification";
+    }
+    out.rows.push_back({kind, cur, nxt});
+  };
+  /// left-folded binary products, one "mul" row each
+  const auto mul_fold = [&](const std::vector<rational>& f) {
+    rational acc = f.at(0);
+    for (std::size_t i = 1; i < f.size(); ++i) {
+      const rational prod = acc * f[i];
+      arith("mul", chain_lit(acc) + "*" + chain_lit(f[i]), prod);
+      acc = prod;
+    }
+    return acc;
+  };
+  try {
+    const auto s = series_solve(p, order);
+    const auto chk = sym::check_odesol_series(p.eq, s.y, x);
+    if (chk.v != sym::series_verdict::equivalent_to_order ||
+        !(s.y == sym::series::of_expr(p.sol, x, order))) {
+      out.certified = false;
+      out.error = "shm residual/coefficient cross-check failed";
+    }
+    // y and v = y' as exact coefficient vectors
+    const std::vector<rational>& yc = s.y.coeffs();
+    std::vector<rational> vc(yc.size() - 1);
+    for (std::size_t n = 0; n + 1 < yc.size(); ++n)
+      vc[n] = rational(bigint(static_cast<long long>(n) + 1)) * yc[n + 1];
+
+    // E0 tree from the ICs (the halfw2 row also anchors the per-order
+    // trees below — everything they use is derived upstream)
+    const rational half(bigint(1), bigint(2));
+    const rational w2 = rational(bigint(w)) * rational(bigint(w));
+    const rational halfw2 = half * w2;
+    const rational t1 = mul_fold({vc[0], vc[0], half});
+    if (w != 1)
+      arith("mul", chain_lit(rational(bigint(w))) + "*" +
+                       chain_lit(rational(bigint(w))),
+            w2);
+    arith("mul", chain_lit(half) + "*" + chain_lit(w2), halfw2);
+    const rational t2 = mul_fold({yc[0], yc[0], halfw2});
+    const rational e0 = t1 + t2;
+    arith("add", t1.to_string() + " + " + chain_lit(t2), e0);
+
+    // per-order vanishing trees: coefficient n of E must be 0
+    const int eorder = static_cast<int>(vc.size());  // order of v*v
+    for (int n = 1; n < eorder; ++n) {
+      std::vector<rational> vals;
+      const auto contribute = [&](const std::vector<rational>& c,
+                                  const rational& scale) {
+        for (int i = 0; i <= n; ++i) {
+          const std::size_t j = static_cast<std::size_t>(n - i);
+          if (static_cast<std::size_t>(i) >= c.size() || j >= c.size())
+            continue;
+          if (c[static_cast<std::size_t>(i)].is_zero() || c[j].is_zero())
+            continue;
+          vals.push_back(
+              mul_fold({scale, c[static_cast<std::size_t>(i)], c[j]}));
+        }
+      };
+      contribute(vc, half);
+      contribute(yc, halfw2);
+      if (vals.empty()) continue;
+      rational acc = vals[0];
+      for (std::size_t i = 1; i < vals.size(); ++i) {
+        const rational sum = acc + vals[i];
+        arith(i + 1 == vals.size() ? "zero" : "add",
+              acc.to_string() + " + " + chain_lit(vals[i]), sum);
+        acc = sum;
+      }
+      if (!acc.is_zero()) {
+        out.certified = false;
+        out.error = "energy coefficient did not vanish";
+      }
+    }
+
+    // problem-level: exact E series == E0 through its order
+    const sym::series sv(std::vector<rational>(vc), eorder);
+    const sym::series sy(
+        std::vector<rational>(yc.begin(),
+                              yc.begin() + eorder),
+        eorder);
+    const sym::series hs(std::vector<rational>{half}, eorder);
+    const sym::series hw(std::vector<rational>{halfw2}, eorder);
+    const sym::series e = hs * (sv * sv) + hw * (sy * sy);
+    if (!(e.coeff(0) == e0)) {
+      out.certified = false;
+      out.error = "E series constant term disagrees with E0 tree";
+    }
+    for (int n = 1; n < eorder; ++n)
+      if (!e.coeff(static_cast<std::size_t>(n)).is_zero()) {
+        out.certified = false;
+        out.error = "E series is not constant to order";
+      }
+  } catch (const std::exception& ex) {
+    out.certified = false;
+    out.error = ex.what();
+  }
+  return out;
+}
+
 }  // namespace ax::mathgen

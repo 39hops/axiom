@@ -27,4 +27,13 @@ pchain_problem make_kin_chain(int level, long long seed);
     the given truncation order with partial sums in t. */
 pchain_problem make_shm_chain(int level, long long seed, int order);
 
+/** Physics rung 2 (llmopt GO 2026-07-23): energy conservation for the
+    SHM family, E = (1/2)v^2 + (1/2)w^2 y^2. Rows: an E0 mul/add tree
+    from the ICs, then per series order n >= 1 the coefficient of E as
+    a mul/add tree whose final fold lands on 0 (kind "zero") —
+    conservation emitted as certified vanishing arithmetic, one
+    primitive per row. Problem-level certification: the exact E series
+    equals the constant E0 through its truncation order. */
+pchain_problem make_energy_chain(int level, long long seed, int order);
+
 }  // namespace ax::mathgen

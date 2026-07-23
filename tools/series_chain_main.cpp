@@ -11,8 +11,12 @@
       kind "add"    cur = one binary addition       nxt = its value
       kind "solve"  cur = (q_n - S)/divisor, everything a literal
                     nxt = a_m
-      kind "append" cur = partial sum through a_{m-1} + O() marker
-                    nxt = partial sum through a_m   + O() marker
+      kind "append" cur = (a_m*x**m) + (partial through a_{m-1} + O())
+                    nxt = partial sum through a_m + O() marker
+    Rung 1e (llmopt 2026-07-23): appends are FOLDS — the new term and
+    the running partial both sit in cur, so nxt is fully determined by
+    its prompt (the 96-vs-47 measurement). Append certification: strip
+    the O() markers, parse -> expand -> exact poly equality.
     cc2_seeds (default = seeds_per_cell) oversamples the ode_cc2 family
     where two-back placement lags.
     Certification: each arithmetic row's cur is re-parsed by the engine
@@ -26,7 +30,9 @@
 #include <ax/mathgen/series_chain.hpp>
 #include <ax/mathgen/series_solve.hpp>
 #include <ax/sym/jsonl.hpp>
+#include <ax/sym/expand.hpp>
 #include <ax/sym/parse.hpp>
+#include <ax/sym/poly.hpp>
 #include <ax/sym/print_sstr.hpp>
 #include <ax/sym/series_oracle.hpp>
 
@@ -51,6 +57,32 @@ std::string partial_sstr(const std::vector<ax::rational>& a, int upto,
 bool folds_to(const std::string& cur, const std::string& nxt) {
   try {
     return ax::sym::to_sstr(ax::sym::parse(cur)) == nxt;
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+/** The new-term spelling a_m * x**m, canonical sstr. */
+std::string term_sstr(const ax::rational& am, int m, const ax::sym::expr& x) {
+  std::vector<ax::rational> c(static_cast<std::size_t>(m) + 1);
+  c[static_cast<std::size_t>(m)] = am;
+  return ax::sym::to_sstr(ax::sym::series(std::move(c), m + 1).to_expr(x));
+}
+
+/** Certify an append fold: strip O() markers, parse both sides, and
+    compare as exact polynomials in x. */
+bool append_certifies(std::string cur, std::string nxt,
+                      const ax::sym::expr& x) {
+  const auto strip_o = [](std::string& s) {
+    const std::size_t p = s.find(" + O(");
+    if (p != std::string::npos) s.erase(p, s.find(')', p) - p + 1);
+  };
+  strip_o(cur);
+  strip_o(nxt);
+  try {
+    return ax::sym::poly::from_expr(ax::sym::expand(ax::sym::parse(cur)),
+                                    x) ==
+           ax::sym::poly::from_expr(ax::sym::parse(nxt), x);
   } catch (const std::exception&) {
     return false;
   }
@@ -127,9 +159,13 @@ int main(int argc, char** argv) {
                    folds_to(r.cur, r.nxt));
             emit(st.n, "solve", st.a_n, d.solve_cur, d.solve_nxt,
                  folds_to(d.solve_cur, d.solve_nxt));
-            emit(st.n, "append", st.a_n,
-                 partial_sstr(sol.y.coeffs(), st.n, x),
-                 partial_sstr(sol.y.coeffs(), st.n + 1, x), true);
+            const std::string acur =
+                "(" + term_sstr(st.a_n, st.n, x) + ") + (" +
+                partial_sstr(sol.y.coeffs(), st.n, x) + ")";
+            const std::string anxt =
+                partial_sstr(sol.y.coeffs(), st.n + 1, x);
+            emit(st.n, "append", st.a_n, acur, anxt,
+                 append_certifies(acur, anxt, x));
           }
         } catch (const std::exception& ex) {
           out << head << ", \"ode_order\": null, \"n\": null, \"kind\": "

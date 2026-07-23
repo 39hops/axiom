@@ -82,6 +82,24 @@ TEST(DomainChain, ShmChainsCertifyAcrossSeeds) {
       check_problem(ax::mathgen::make_shm_chain(level, seed, 8), 't');
 }
 
+TEST(DomainChain, EnergyChainsCertifyAcrossSeeds) {
+  for (int level = 1; level <= 3; ++level)
+    for (long long seed = 0; seed < 10; ++seed)
+      check_problem(ax::mathgen::make_energy_chain(level, seed, 8), 't');
+}
+
+TEST(DomainChain, EnergyOrdersEndOnZeroRows) {
+  const auto p = ax::mathgen::make_energy_chain(2, 0, 8);
+  ASSERT_TRUE(p.certified) << p.error;
+  int zeros = 0;
+  for (const auto& r : p.rows)
+    if (r.kind == "zero") {
+      ++zeros;
+      EXPECT_EQ(r.nxt, "0") << r.cur;
+    }
+  EXPECT_GE(zeros, 2);  // several orders must vanish visibly
+}
+
 TEST(DomainChain, ShmRowsCarryTNotX) {
   const auto p = ax::mathgen::make_shm_chain(2, 0, 8);
   ASSERT_TRUE(p.certified) << p.error;

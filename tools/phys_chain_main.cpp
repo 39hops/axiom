@@ -1,8 +1,9 @@
 /** phys-chain: physics rung 1 emitter (llmopt GO 2026-07-23).
     Usage:
-      axiom-phys-chain <out.jsonl> [seeds_per_cell] [order]
-    Families phys_kin (a(t) -> v(t) -> x(t) with ICs) and phys_shm
-    (y'' + w^2 y = 0, the certified cc2 recurrence relabeled), emitted
+      axiom-phys-chain <out.jsonl> [seeds_per_cell] [order] [family]
+    Families phys_kin (a(t) -> v(t) -> x(t) with ICs), phys_shm
+    (y'' + w^2 y = 0, the certified cc2 recurrence relabeled), and
+    phys_energy (rung 2: conservation as vanishing arithmetic), emitted
     with t throughout (vocab-41; the math-expert rename t->x is the
     router's side of the interface). Certification: see physchain.hpp.
     Failing problems are written with verdict UNDECIDED, never
@@ -29,12 +30,15 @@ int main(int argc, char** argv) {
     return 2;
   }
   long long problems = 0, ok = 0, rows = 0;
-  for (int fam = 0; fam < 2; ++fam)
+  const char* only = argc > 4 ? argv[4] : nullptr;  // family filter
+  for (int fam = 0; fam < 3; ++fam)
     for (int level = 1; level <= 3; ++level)
       for (long long seed = 0; seed < seeds; ++seed) {
         const mathgen::pchain_problem p =
-            fam == 0 ? mathgen::make_kin_chain(level, seed)
-                     : mathgen::make_shm_chain(level, seed, order);
+            fam == 0   ? mathgen::make_kin_chain(level, seed)
+            : fam == 1 ? mathgen::make_shm_chain(level, seed, order)
+                       : mathgen::make_energy_chain(level, seed, order);
+        if (only && p.family != only) continue;
         ++problems;
         if (p.certified) ++ok;
         int n = 0;
