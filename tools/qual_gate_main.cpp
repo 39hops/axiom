@@ -112,7 +112,17 @@ int main(int argc, char** argv) {
       why = "expired";  // the wall ended this root, not the search:
       ++expired[level];  // expired != unsolvable (llmopt farm lesson)
     }
-    if (ok) {
+    if (ok && !(root.is_fn() && root.name() == "Integral")) {
+      // composite root (practice-mode stuck state, not a pure Integral
+      // node): the integrand-based diff-back below misreads it — use
+      // the whole-edge oracle instead (same bar as chain emission)
+      if (!search::verify_edge(root, res.best.e,
+                               search::default_rules().external)) {
+        ok = false;
+        why = "EDGE-UNDECIDED";
+        ++edge_certified[level];
+      }
+    } else if (ok) {
       const sym::expr integrand = root.args()[0];
       // size-gate the whole-chain certificate (the wedge lesson, third
       // face: the unbounded step was POST-search diff-back canonical on

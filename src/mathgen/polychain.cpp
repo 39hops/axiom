@@ -288,11 +288,21 @@ pchain_problem pf_build(const std::string& family, const std::string& tag,
   }
   poly recon = parts.at(0);
   for (std::size_t i = 1; i < parts.size(); ++i) {
-    const poly s = recon + parts[i];
+    // one COEFFICIENT per row (llmopt: operand size is a second axis):
+    // fold each nonzero term of the incoming part into the accumulator,
+    // constant add facts first, then the single-term poly fold
     termwise_add(out, recon, parts[i]);
-    poly_row(out, "padd",
-             "(" + psstr(recon) + ") + (" + psstr(parts[i]) + ")", s);
-    recon = s;
+    for (int j = 0; j <= parts[i].degree(); ++j) {
+      const rational& cj = parts[i].coeff(static_cast<std::size_t>(j));
+      if (cj.is_zero()) continue;
+      std::vector<rational> tc(static_cast<std::size_t>(j) + 1);
+      tc[static_cast<std::size_t>(j)] = cj;
+      const poly term(std::move(tc));
+      const poly s = recon + term;
+      poly_row(out, "padd",
+               "(" + psstr(term) + ") + (" + psstr(recon) + ")", s);
+      recon = s;
+    }
   }
   // assemble row: N/prod(x - a_i) -> sum res_i/(x - a_i)
   std::string den_str, sum_str;
@@ -361,16 +371,55 @@ pchain_problem make_bridge_chain(int level, long long seed) {
         std::vector<expr>{expr::num(residues[i]) / fac, kX}));
     antis.push_back(expr::num(residues[i]) * expr::fn("log", fac));
   }
-  expr split = pieces[0];
-  expr closed = antis[0];
-  for (std::size_t i = 1; i < pieces.size(); ++i) {
-    split = split + pieces[i];
-    closed = closed + antis[i];
+  // per-piece peel (llmopt 2026-07-23 night: the one-fact append
+  // pattern that closed series at 98): each "ibridge" row splits off
+  // ONE residue integral, leaving a smaller certified rational
+  // integral. M_{k+1} = (M_k - r_k * prod_{j>k}(x - a_j)) / (x - a_k),
+  // exact by the residue construction (division checked remainder-0).
+  expr state = whole;
+  poly rem = num;
+  for (std::size_t k = 0; k + 1 < roots.size(); ++k) {
+    poly tail_prod({kOne});
+    expr tail_den = kX - expr::num(roots[k + 1]);
+    for (std::size_t j = k + 1; j < roots.size(); ++j) {
+      tail_prod = tail_prod * poly({rational() - roots[j], kOne});
+      if (j > k + 1) tail_den = tail_den * (kX - expr::num(roots[j]));
+    }
+    const auto [m_next, m_rem] =
+        (rem - poly({residues[k]}) * tail_prod)
+            .divmod(poly({rational() - roots[k], kOne}));
+    if (!(m_rem == poly())) {
+      out.certified = false;
+      out.error = "peel division left a remainder";
+    }
+    rem = m_next;
+    expr next = pieces[0];
+    for (std::size_t j = 1; j <= k; ++j) next = next + pieces[j];
+    const expr remaining = expr::fn(
+        "Integral", std::vector<expr>{rem.to_expr(kX) / tail_den, kX});
+    next = k == 0 ? pieces[0] + remaining : next + remaining;
+    edge_row("ibridge", state, next);
+    state = next;
   }
-  edge_row("ibridge", whole, split);
+  // the last remaining integral IS the last residue piece; assert so
+  if (!(rem == poly({residues[roots.size() - 1]}))) {
+    out.certified = false;
+    out.error = "peel chain did not terminate on the last residue";
+  }
+  expr split = pieces[0];
+  for (std::size_t i = 1; i < pieces.size(); ++i) split = split + pieces[i];
   for (std::size_t i = 0; i < pieces.size(); ++i)
     edge_row("iclose", pieces[i], antis[i]);
-  edge_row("close", whole, closed);
+  // per-piece close fold: replace one integral piece with its log per
+  // row, walking the full state from the split to the closed form
+  state = split;
+  for (std::size_t i = 0; i < pieces.size(); ++i) {
+    expr next = antis[0];
+    for (std::size_t j = 1; j < pieces.size(); ++j)
+      next = next + (j <= i ? antis[j] : pieces[j]);
+    edge_row("close", state, next);
+    state = next;
+  }
   return out;
 }
 

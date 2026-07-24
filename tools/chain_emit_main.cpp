@@ -52,9 +52,13 @@ int main(int argc, char** argv) {
   long long emitted_roots = 0, rows = 0, dropped_pairs = 0,
             replay_failures = 0;
   std::string line;
+  long long root_errors = 0;
   while (std::getline(in, line)) {
     if (line.empty()) continue;
     if (max_roots >= 0 && emitted_roots >= max_roots) break;
+    // per-root fault isolation: one bad root is booked and reported,
+    // never an abort() dialog (no top-level handler = CRT GUI box)
+    try {
     const auto row = sym::jsonl::parse_line(line);
     const int level = std::stoi(row.at("level"));
     const sym::expr root = sym::parse(row.at("root"));
@@ -112,9 +116,15 @@ int main(int argc, char** argv) {
       any = true;
     }
     if (any) ++emitted_roots;
+    } catch (const std::exception& ex) {
+      ++root_errors;
+      std::cerr << "[root-error] " << ex.what() << " :: "
+                << line.substr(0, 120) << "\n";
+    }
   }
   std::cerr << "== emitted " << rows << " rows from " << emitted_roots
             << " roots; dropped pairs " << dropped_pairs
-            << "; replay failures " << replay_failures << "\n";
+            << "; replay failures " << replay_failures
+            << "; root errors " << root_errors << "\n";
   return 0;
 }

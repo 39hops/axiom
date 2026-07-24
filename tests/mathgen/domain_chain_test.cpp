@@ -82,9 +82,10 @@ TEST(DomainChain, BridgeChainsCertifyAcrossSeeds) {
         if (r.kind == "iclose") ++iclose;
         if (r.kind == "close") ++close;
       }
-      EXPECT_EQ(ibridge, 1);
-      EXPECT_EQ(close, 1);
-      EXPECT_EQ(iclose, level >= 2 ? 3 : 2);
+      const int nroots = level >= 2 ? 3 : 2;
+      EXPECT_EQ(ibridge, nroots - 1);  // one peel per row
+      EXPECT_EQ(close, nroots);        // one piece folded per row
+      EXPECT_EQ(iclose, nroots);
     }
 }
 
