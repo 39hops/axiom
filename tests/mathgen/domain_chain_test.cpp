@@ -76,16 +76,35 @@ TEST(DomainChain, BridgeChainsCertifyAcrossSeeds) {
       const auto p = ax::mathgen::make_bridge_chain(level, seed);
       EXPECT_TRUE(p.certified) << p.family << " L" << level << " seed "
                                << seed << ": " << p.error;
-      int ibridge = 0, iclose = 0, close = 0;
+      int ibridge = 0, icancel = 0, iclose = 0, close = 0;
       for (const auto& r : p.rows) {
         if (r.kind == "ibridge") ++ibridge;
+        if (r.kind == "icancel") ++icancel;
         if (r.kind == "iclose") ++iclose;
         if (r.kind == "close") ++close;
       }
       const int nroots = level >= 2 ? 3 : 2;
-      EXPECT_EQ(ibridge, nroots - 1);  // one peel per row
+      EXPECT_EQ(ibridge, nroots - 1);  // one residue split per row
+      EXPECT_EQ(icancel, nroots - 1);  // one factor cancellation per row
       EXPECT_EQ(close, nroots);        // one piece folded per row
       EXPECT_EQ(iclose, nroots);
+      // one-integral discipline: an ibridge row introduces exactly one
+      // NEW Integral literal in nxt vs cur; icancel rewrites one to one
+      for (const auto& r : p.rows) {
+        if (r.kind != "ibridge" && r.kind != "icancel") continue;
+        const auto count = [](const std::string& s) {
+          int n = 0;
+          for (std::size_t pos = 0;
+               (pos = s.find("Integral(", pos)) != std::string::npos;
+               pos += 9)
+            ++n;
+          return n;
+        };
+        if (r.kind == "ibridge")
+          EXPECT_EQ(count(r.nxt), count(r.cur) + 1) << r.cur;
+        else
+          EXPECT_EQ(count(r.nxt), count(r.cur)) << r.cur;
+      }
     }
 }
 

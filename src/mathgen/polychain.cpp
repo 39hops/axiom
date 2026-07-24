@@ -385,20 +385,42 @@ pchain_problem make_bridge_chain(int level, long long seed) {
       tail_prod = tail_prod * poly({rational() - roots[j], kOne});
       if (j > k + 1) tail_den = tail_den * (kX - expr::num(roots[j]));
     }
+    const poly scaled = poly({residues[k]}) * tail_prod;
+    const poly sub_num = rem - scaled;
     const auto [m_next, m_rem] =
-        (rem - poly({residues[k]}) * tail_prod)
-            .divmod(poly({rational() - roots[k], kOne}));
+        sub_num.divmod(poly({rational() - roots[k], kOne}));
     if (!(m_rem == poly())) {
       out.certified = false;
       out.error = "peel division left a remainder";
     }
+    // determining context for the subtracted numerator: r_k * T_k as
+    // constant "mul" facts + the pmul row, then per-coefficient "sub"
+    // facts + the psub row (same doctrine as the pf recombination)
+    termwise_mul(out, residues[k], tail_prod);
+    poly_row(out, "pmul",
+             chain_lit(residues[k]) + "*(" + psstr(tail_prod) + ")", scaled);
+    termwise_sub(out, rem, scaled);
+    poly_row(out, "psub",
+             "(" + psstr(rem) + ") - (" + psstr(scaled) + ")", sub_num);
+    // recipe application #6 (llmopt 2026-07-24 morning: peel was still
+    // a two-integral row at 4/15): the peel is now TWO one-fact rows —
+    // "ibridge" splits off the residue integral, leaving the literal
+    // subtraction (M - r*T)/D un-divided (copyable arithmetic from
+    // cur); "icancel" then cancels the (x - a_k) factor, one integral
+    // rewritten to one integral.
+    const expr cur_den = (kX - expr::num(roots[k])) * tail_den;
+    expr prefix = pieces[0];
+    for (std::size_t j = 1; j <= k; ++j) prefix = prefix + pieces[j];
+    const expr sub_integral = expr::fn(
+        "Integral", std::vector<expr>{sub_num.to_expr(kX) / cur_den, kX});
+    const expr mid = k == 0 ? pieces[0] + sub_integral
+                            : prefix + sub_integral;
+    edge_row("ibridge", state, mid);
     rem = m_next;
-    expr next = pieces[0];
-    for (std::size_t j = 1; j <= k; ++j) next = next + pieces[j];
     const expr remaining = expr::fn(
         "Integral", std::vector<expr>{rem.to_expr(kX) / tail_den, kX});
-    next = k == 0 ? pieces[0] + remaining : next + remaining;
-    edge_row("ibridge", state, next);
+    const expr next = k == 0 ? pieces[0] + remaining : prefix + remaining;
+    edge_row("icancel", mid, next);
     state = next;
   }
   // the last remaining integral IS the last residue piece; assert so
