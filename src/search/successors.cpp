@@ -3,6 +3,7 @@
 #include <ax/sym/budget.hpp>
 #include <ax/sym/calc.hpp>
 #include <ax/sym/count_ops.hpp>
+#include <ax/sym/print_sstr.hpp>
 
 #include <algorithm>
 #include <iostream>
@@ -142,6 +143,12 @@ std::vector<std::pair<std::string, state>> successors(
         opt.verify_p >= 1.0 ||
         static_cast<double>(child_expr.hash() % 1000) <
             opt.verify_p * 1000.0;
+    static const bool trace_verify =
+        std::getenv("AX_TRACE_FIRE") != nullptr;
+    if (trace_verify)
+      std::cerr << "[verify-start] " << name << " parent "
+                << sym::count_ops(s.e) << " ops :: child "
+                << sym::to_sstr(child_expr) << std::endl;
     if (pay_oracle &&
         !verify_edge(s.e, child_expr, rules.external))
       return;
@@ -165,6 +172,11 @@ std::vector<std::pair<std::string, state>> successors(
       if (fire_mask_check(r.first, node))
         return rule_cache.emplace(key, std::move(rewrites)).first->second;
       bool aborted = false;
+      static const bool trace_fire = std::getenv("AX_TRACE_FIRE") != nullptr;
+      if (trace_fire)
+        std::cerr << "[fire-start] " << r.first << " ops "
+                  << sym::count_ops(node) << " :: " << sym::to_sstr(node)
+                  << std::endl;
       const auto t0 = std::chrono::steady_clock::now();
       try {
         sym::work_budget_scope budget(std::chrono::milliseconds(8000));

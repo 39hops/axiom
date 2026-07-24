@@ -46,6 +46,7 @@ add_executable(ax_tests
   sym/integrate_test.cpp
   sym/parse_test.cpp
   sym/oracle_test.cpp
+  sym/powpow_hang_test.cpp
   sym/jsonl_test.cpp
   sym/print_sstr_test.cpp
   sym/count_ops_test.cpp

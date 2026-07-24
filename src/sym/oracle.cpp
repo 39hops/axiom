@@ -379,6 +379,7 @@ expr canonical_impl(const expr& e0, const expr& x, bool use_trial) {
     };
     bool progress = true;
     while (progress && !den.is_num()) {
+      check_work_budget();  // the (x^n)^(p/q) wedge polled nothing
       progress = false;
       // candidate factors: non-numeric factors of the first num term
       for (const expr& f : factor_list(terms_of(num).front())) {
@@ -386,7 +387,12 @@ expr canonical_impl(const expr& e0, const expr& x, bool use_trial) {
             f.is_pow() && f.args()[1].is_num() && kZero < f.args()[1].value()
                 ? f.args()[0]
                 : f;
-        if (base.is_num()) continue;
+        // a pow base (e.g. x**2 from (x**2)**(1/2)) can never merge-
+        // cancel: make_pow(x**2, -1) normalizes to x**(-2) under base
+        // key x, so t/base leaves the radical intact and the loop
+        // divides forever (v5 farm wedge, root m-l8-v5s1-330). Add and
+        // atom bases keep their key through pow(-1) and cancel fine.
+        if (base.is_num() || base.is_pow()) continue;
         bool all = true;
         for (const expr& t : terms_of(num)) all = all && has_factor(t, base);
         for (const expr& t : terms_of(den)) all = all && has_factor(t, base);
