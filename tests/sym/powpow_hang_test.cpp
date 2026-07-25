@@ -163,3 +163,68 @@ TEST(PowPowHang, WildSpecimenFarmRootSolves) {
                                     rules.external))
         << "edge " << i << " fails certification";
 }
+
+TEST(PowPowHang, ILinearBasisOnCosLogNode) {
+  // second wedge family (v5 farm, m-l8-v5s1-158 hardkilled both
+  // rounds): i_linear_basis on a cos(log(quadratic)) rational integrand
+  const sym::expr node = sym::parse(
+      "Integral(4*x*(6*x + 1)*cos(log(3*x**2 + x + 4))"
+      "/(3*x**2 + x + 4), x)");
+  const search::rule* lin = nullptr;
+  for (const auto& r : search::default_rules().integral)
+    if (r.first == "i_linear_basis") lin = &r;
+  ASSERT_NE(lin, nullptr);
+  EXPECT_TRUE(finishes([&] { (void)lin->second(node); }))
+      << "i_linear_basis hangs on the cos(log) node";
+}
+
+TEST(PowPowHang, CanonicalCosLogCancelDifference) {
+  // wedge family #2 (m-l8-v5s1-158/-202, hardkilled both v5 rounds):
+  // verify_edge on a "cancel" edge hangs — the integrand difference
+  // mixes atan/log opaques over gcd-sharing denominators
+  const sym::expr a = sym::parse(
+      "12*log(2*x)/(9*x**2 + 1) + 4*atan(3*x)/x");
+  const sym::expr b = sym::parse(
+      "36*x**2*atan(3*x)/(9*x**3 + x) + 12*x*log(2*x)/(9*x**3 + x)"
+      " + 4*atan(3*x)/(9*x**3 + x)");
+  EXPECT_TRUE(finishes([&] { (void)sym::canonical(a - b, X); }))
+      << "canonical hangs on the cancel-edge integrand difference";
+  EXPECT_TRUE(finishes([&] {
+    (void)sym::equivalent(a, b, X);
+  })) << "equivalent hangs on the cancel-edge integrands";
+}
+
+TEST(PowPowHang, VerifyEdgeCosLogCancelPair) {
+  // the exact hanging verify (v5 farm trace): whole-state edge with
+  // the sin(log) closed term and Integral carriers present
+  const sym::expr parent = sym::parse(
+      "4*x*sin(log(3*x**2 + x + 4)) + Integral(12*log(2*x)/(9*x**2 + 1)"
+      " + 4*atan(3*x)/x, x)");
+  const sym::expr child = sym::parse(
+      "4*x*sin(log(3*x**2 + x + 4)) + Integral(36*x**2*atan(3*x)"
+      "/(9*x**3 + x) + 12*x*log(2*x)/(9*x**3 + x)"
+      " + 4*atan(3*x)/(9*x**3 + x), x)");
+  const search::external_slots ext{};
+  EXPECT_TRUE(finishes([&] {
+    (void)search::verify_edge(parent, child, ext);
+  })) << "verify_edge hangs on the cancel pair";
+}
+
+TEST(PowPowHang, AnnotateCosLogWildSpecimen) {
+  // wedge family #2 wild specimen (m-l8-v5s1-158): annotate fired every
+  // hint-probe rule BARE — no work budget — so one slow fire hung chain
+  // emission after a 66s solve. The full annotate must finish under the
+  // budget discipline now (hang = regression).
+  const sym::expr cur = sym::parse(
+      "4*x*sin(log(3*x**2 + x + 4)) + Integral(12*log(2*x)/(9*x**2 + 1)"
+      " + 4*atan(3*x)/x, x)");
+  const auto t0 = std::chrono::steady_clock::now();
+  search::annotation ann;
+  ann = search::annotate(cur, search::default_rules(), "i_unprod");
+  const double dt = std::chrono::duration<double>(
+                        std::chrono::steady_clock::now() - t0)
+                        .count();
+  // generous wall: every probe is individually 8s-budgeted; the whole
+  // annotate over ~20 rules must stay far under a farm hardkill window
+  EXPECT_LT(dt, 60.0) << "annotate exceeded the bounded-probe budget";
+}

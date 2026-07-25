@@ -7,6 +7,7 @@
     verbalized derivation via the DERIV_TRACE analogue). */
 #include <ax/search/search.hpp>
 
+#include <ax/sym/budget.hpp>
 #include <ax/sym/count_ops.hpp>
 
 #include <functional>
@@ -94,26 +95,36 @@ annotation annotate(const expr& cur, const rule_set& rules,
   annotation out;
   const auto node = largest_integral(cur);
   if (!node) return out;
+  // every probe fire runs under the search's rule budget (the cos(log)
+  // lesson, m-l8-v5s1-158: annotate fired rules BARE, so a slow fire
+  // that the search would abort at 8s hung the whole emission); a
+  // budget-expired probe is a conservative no-hint, same as in search
+  const auto probed = [&](const auto& fn) {
+    try {
+      sym::work_budget_scope budget(std::chrono::milliseconds(8000));
+      return !fn(*node).empty();
+    } catch (const std::exception&) {
+      return false;
+    }
+  };
   for (const auto& [name, fn] : rules.integral)
-    if (!fn(*node).empty()) out.hints.push_back(name);
+    if (probed(fn)) out.hints.push_back(name);
   // external slots are part of llmopt's INT_RULES (i_heurisch sits in
   // their list), so they belong in the hints vocabulary too — omitting
   // them would make native rows' hint distribution differ from
   // sympy-farmed rows for the same node. Probed last; slot failures are
   // conservative (no hint), same as in search.
-  for (const auto& [name, fn] : rules.external.int_rules) {
-    bool fired = false;
-    try {
-      fired = !fn(*node).empty();
-    } catch (const std::exception&) {
-    }
-    if (fired) out.hints.push_back(name);
-  }
+  for (const auto& [name, fn] : rules.external.int_rules)
+    if (probed(fn)) out.hints.push_back(name);
   if (fired_rule == "i_linear_basis" || fired_rule == "i_sqrt_basis") {
     for (const auto& [name, fn] : rules.integral)
       if (name == fired_rule) {
         deriv_trace_arm();
-        (void)fn(*node);
+        try {
+          sym::work_budget_scope budget(std::chrono::milliseconds(8000));
+          (void)fn(*node);
+        } catch (const std::exception&) {
+        }
         out.think = deriv_trace_take();
         break;
       }

@@ -146,8 +146,8 @@ std::vector<std::pair<std::string, state>> successors(
     static const bool trace_verify =
         std::getenv("AX_TRACE_FIRE") != nullptr;
     if (trace_verify)
-      std::cerr << "[verify-start] " << name << " parent "
-                << sym::count_ops(s.e) << " ops :: child "
+      std::cerr << "[verify-start] " << name << " parent :: "
+                << sym::to_sstr(s.e) << " :: child "
                 << sym::to_sstr(child_expr) << std::endl;
     if (pay_oracle &&
         !verify_edge(s.e, child_expr, rules.external))
