@@ -93,15 +93,21 @@ zx_problem make_zx_chain(int size, long long seed) {
   }
   p.level = tcount_level(g.t_count());
 
-  // descent: greedy tier (fuse/id before lcomp/pivot), uniform inside
-  const int max_plies = 128;
+  // descent v2: fuse/id tier, then lcomp/pivot, then color-change
+  // (move five) — coloring an X spider hadamard-flips its edges, so
+  // the graph-like patches lcomp/pivot need actually arise; uniform
+  // draw inside the active tier
+  const int max_plies = 192;
   for (int ply = 0; ply < max_plies; ++ply) {
     const auto all = zx::candidates(g);
     if (all.empty()) break;
     std::vector<zx::move> tier;
     for (const auto& m : all)
       if (m.kind == "fuse" || m.kind == "id") tier.push_back(m);
-    if (tier.empty()) tier = all;
+    if (tier.empty())
+      for (const auto& m : all)
+        if (m.kind == "lcomp" || m.kind == "pivot") tier.push_back(m);
+    if (tier.empty()) tier = all;  // only color moves remain
     const auto& m = tier[rng.choice_index(tier.size())];
 
     pyrand::python_random label_rng(

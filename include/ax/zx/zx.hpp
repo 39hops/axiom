@@ -38,6 +38,7 @@ enum class etype : std::uint8_t { plain, hadamard };
 class graph {
  public:
   int add_vertex(vkind kind, int phase = 0);
+  void set_kind(int v, vkind k) { verts_.at(v).kind = k; }
   /** Register a boundary vertex as the next ordered input / output. */
   void mark_input(int v);
   void mark_output(int v);
@@ -111,8 +112,15 @@ void apply_lcomp(graph& g, int u);
 bool check_pivot(const graph& g, int u, int v);
 void apply_pivot(graph& g, int u, int v);
 
+/** Color change at X spider u (the to_gh path, move five — llmopt GO
+    2026-07-26): u becomes a Z spider and every incident edge flips
+    type (plain <-> hadamard). Structure is untouched, so the only
+    refusal is "u is an alive X spider". */
+bool check_color(const graph& g, int u);
+void apply_color(graph& g, int u);
+
 struct move {
-  std::string kind;  ///< fuse | id | lcomp | pivot
+  std::string kind;  ///< fuse | id | lcomp | pivot | color
   int a = -1;        ///< primary vertex
   int b = -1;        ///< second vertex (fuse, pivot), else -1
 };

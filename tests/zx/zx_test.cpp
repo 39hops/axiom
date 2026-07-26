@@ -122,6 +122,24 @@ TEST(ZxPivot, ComplementsGroupsAndShiftsPhases) {
   EXPECT_EQ(g.phase(c), 1);  // 1 + 0 + 4 + 4 mod 8
 }
 
+TEST(ZxColor, FlipsIncidentEdgesAndRecolors) {
+  zx::graph g;
+  const int in = g.add_vertex(vkind::boundary);
+  g.mark_input(in);
+  const int u = g.add_vertex(vkind::x, 3);
+  const int z = g.add_vertex(vkind::z, 1);
+  g.add_edge(in, u, etype::plain);
+  g.add_edge(u, z, etype::hadamard);
+  ASSERT_TRUE(zx::check_color(g, u));
+  EXPECT_FALSE(zx::check_color(g, z));  // Z spider: no
+  zx::apply_color(g, u);
+  EXPECT_EQ(g.kind(u), vkind::z);
+  EXPECT_EQ(g.phase(u), 3);                  // phase untouched
+  EXPECT_EQ(g.edge(in, u), etype::hadamard);  // flipped
+  EXPECT_EQ(g.edge(u, z), etype::plain);      // flipped
+  EXPECT_FALSE(zx::check_color(g, u));  // no longer X
+}
+
 TEST(ZxSerialize, BoundaryAnchoredAndLabelDriven) {
   zx::graph g = two_spider_wire(1, 5);
   std::vector<int> labels = {0, 2, 3, 1};  // in=0, out=1, a=2, b=3

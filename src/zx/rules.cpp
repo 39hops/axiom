@@ -149,6 +149,21 @@ void apply_pivot(graph& g, int u, int v) {
   for (int x : c) g.set_phase(x, g.phase(x) + pu + pv + 4);
 }
 
+bool check_color(const graph& g, int u) {
+  return g.alive(u) && g.kind(u) == vkind::x;
+}
+
+void apply_color(graph& g, int u) {
+  require(check_color(g, u), "apply_color without check");
+  g.set_kind(u, vkind::z);
+  const std::set<int> ns = g.neighbors(u);
+  for (int n : ns) {
+    const etype t = g.edge(u, n);
+    g.remove_edge(u, n);
+    g.add_edge(u, n, t == etype::plain ? etype::hadamard : etype::plain);
+  }
+}
+
 std::vector<move> candidates(const graph& g) {
   std::vector<move> out;
   const int n = g.vertex_slots();
@@ -160,6 +175,7 @@ std::vector<move> candidates(const graph& g) {
     if (check_lcomp(g, u)) out.push_back({"lcomp", u, -1});
     for (int v : g.neighbors(u))
       if (u < v && check_pivot(g, u, v)) out.push_back({"pivot", u, v});
+    if (check_color(g, u)) out.push_back({"color", u, -1});
   }
   return out;
 }
@@ -173,6 +189,8 @@ void apply(graph& g, const move& m) {
     apply_lcomp(g, m.a);
   else if (m.kind == "pivot")
     apply_pivot(g, m.a, m.b);
+  else if (m.kind == "color")
+    apply_color(g, m.a);
   else
     throw std::invalid_argument("apply: unknown move " + m.kind);
 }
