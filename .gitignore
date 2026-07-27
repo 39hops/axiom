@@ -13,3 +13,4 @@ o.err
 # session/farm logs
 logs/
 *.log
+__pycache__/
