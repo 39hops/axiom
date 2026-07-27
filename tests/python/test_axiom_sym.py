@@ -165,5 +165,30 @@ r = ax.emit_chain(ax.parse_sstr("Integral(sin(x)**2, x)"), 6, budget=100,
 check("emit_chain telemetry present",
       r["solved"] and r["slot_fires"] >= 1 and r["slot_decisive"] >= 0)
 
+# ---- solve_batch (relay 2026-07-27-2 ask 1: batch value-labeling)
+
+batch_states = [ax.parse_sstr(s) for s in (
+    "Integral(21*x**2 + 9, x)", "Integral(4, x)",
+    "Integral(x*cos(x), x)", "Integral(exp(x**2), x)")]
+labels = ax.solve_batch(batch_states, 150)
+check("solve_batch shape", len(labels) == len(batch_states))
+check("solve_batch deterministic",
+      ax.solve_batch(batch_states, 150) == labels)
+agree = True
+for s, (solved, plies, nodes) in zip(batch_states, labels):
+    d = ax.solve(s, 150, 24, 3)
+    agree = agree and d["solved"] == solved and d["nodes"] == nodes
+    if d["solved"]:
+        agree = agree and len(d["history"]) == plies
+check("solve_batch agrees with sequential solve", agree)
+
+# ---- interface version (arm-time assertion contract)
+
+check("interface version present",
+      isinstance(ax.INTERFACE_VERSION, int) and ax.INTERFACE_VERSION >= 1)
+missing = [n for n in ax.INTERFACE
+           if not callable(getattr(ax, n, None))]
+check("pinned interface complete", not missing)
+
 print(f"\n{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)

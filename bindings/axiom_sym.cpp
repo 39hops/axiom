@@ -10,6 +10,8 @@
     NOT_EQUIVALENT / UNDECIDED; parse failures raise ValueError. */
 #include <pybind11/pybind11.h>
 
+#include <ax/par/pool.hpp>
+#include <ax/search/inverse.hpp>
 #include <ax/search/search.hpp>
 #include <ax/sym/calc.hpp>
 #include <ax/sym/expr.hpp>
@@ -399,4 +401,100 @@ PYBIND11_MODULE(axiom_sym, m) {
       "(dropped_pairs), never written. replay_ok=False means the "
       "winning history did not replay — the root is skipped, not "
       "guessed.");
+
+  // ------------------------------------------- batch value-labeling
+  m.def(
+      "solve_batch",
+      [](const std::vector<sym::expr>& states, long long budget, int plies,
+         int width, const std::string& prior_tsv, long long deadline_ms,
+         unsigned threads) {
+        namespace se = ax::search;
+        const se::rule_set& rules = se::default_rules();  // pure native
+        std::optional<se::markov_prior> prior;
+        if (!prior_tsv.empty()) prior = se::markov_prior::load_tsv(prior_tsv);
+        std::vector<std::tuple<bool, int, long long>> out(states.size());
+        {
+          // no Python callables anywhere below: release for the batch
+          py::gil_scoped_release run_without_gil;
+          ax::thread_pool pool(threads);
+          std::vector<std::future<void>> futs;
+          futs.reserve(states.size());
+          for (std::size_t i = 0; i < states.size(); ++i)
+            futs.push_back(pool.submit([&, i] {
+              try {
+                se::beam_options opt;
+                opt.width = width;
+                opt.max_plies = plies;
+                opt.max_nodes = budget;
+                opt.use_macros = true;
+                if (prior) {
+                  opt.proposer = prior->proposer();
+                  opt.propose_k = 3;
+                }
+                if (deadline_ms > 0)
+                  opt.deadline = std::chrono::steady_clock::now() +
+                                 std::chrono::milliseconds(deadline_ms);
+                const auto res = se::beam_search(states[i], rules, opt);
+                out[i] = {res.solved, res.best.plies, res.nodes};
+              } catch (const std::exception&) {
+                // one bad state costs one label, never the batch
+                out[i] = {false, 0, 0};
+              }
+            }));
+          for (auto& f : futs) f.get();
+        }
+        return out;
+      },
+      py::arg("states"), py::arg("budget") = 150, py::arg("plies") = 24,
+      py::arg("width") = 3, py::arg("prior_tsv") = std::string(),
+      py::arg("deadline_ms") = 8000, py::arg("threads") = 0,
+      "Native batch value-labeling (relay 2026-07-27-2 ask 1): "
+      "[(solved, plies, nodes)] per state, pool-parallel with the GIL "
+      "released for the whole batch (threads=0 -> hardware "
+      "concurrency). Pure native rules — no slots — so labels are "
+      "deterministic given (budget, plies, width, prior); the "
+      "deadline_ms wall is a safety net whose expiries are the only "
+      "load-dependent outcomes (expired searches report solved=False). "
+      "PARITY FENCE: cache these labels under engine=axiom unless the "
+      "agreement gate vs the python solver passes — the two label "
+      "families never mix.");
+
+  m.def(
+      "predecessors",
+      [](const sym::expr& t, std::size_t max_candidates,
+         long long deadline_ms, bool use_macros) {
+        ax::search::inverse_options opt;
+        opt.max_candidates = max_candidates;
+        opt.use_macros = use_macros;
+        if (deadline_ms > 0)
+          opt.deadline = std::chrono::steady_clock::now() +
+                         std::chrono::milliseconds(deadline_ms);
+        std::vector<std::pair<std::string, sym::expr>> out;
+        for (auto& pr : ax::search::predecessors(
+                 t, ax::search::default_rules(), opt))
+          out.emplace_back(pr.rule, pr.p);
+        return out;
+      },
+      py::arg("state"), py::arg("max_candidates") = 160,
+      py::arg("deadline_ms") = 0, py::arg("use_macros") = true,
+      py::call_guard<py::gil_scoped_release>(),
+      "S7 inverse-move enumeration: [(rule, predecessor)] with t in "
+      "successors(predecessor), settled by the forward engine at "
+      "verify_p=1 — every returned pair is an oracle-verified legal "
+      "edge (gate: 98% true-predecessor containment, 12.3ms median).");
+
+  // -------------------------------------------- versioned interface
+  // Friendly-fire doctrine: llmopt version-asserts at arm time. Bump
+  // INTERFACE_VERSION on ANY breaking change to a pinned name's
+  // signature or semantics; additions bump it too so arms can require
+  // the surface they use. History:
+  //   1 = parse_sstr/diff/canonical/equivalent/equivalent_mod_const/
+  //       solve/emit_chain (pre-relay surface)
+  //   2 = + verify_edge, dead_mask, dead_reason, solve_batch,
+  //       predecessors (relays 2026-07-27-0 / -2)
+  m.attr("INTERFACE_VERSION") = 2;
+  m.attr("INTERFACE") = py::make_tuple(
+      "parse_sstr", "diff", "canonical", "equivalent",
+      "equivalent_mod_const", "verify_edge", "dead_mask", "dead_reason",
+      "predecessors", "solve", "solve_batch", "emit_chain");
 }
