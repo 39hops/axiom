@@ -175,12 +175,15 @@ check("solve_batch shape", len(labels) == len(batch_states))
 check("solve_batch deterministic",
       ax.solve_batch(batch_states, 150) == labels)
 agree = True
-for s, (solved, plies, nodes) in zip(batch_states, labels):
+for s, (solved, plies, nodes, expired) in zip(batch_states, labels):
     d = ax.solve(s, 150, 24, 3)
-    agree = agree and d["solved"] == solved and d["nodes"] == nodes
+    agree = (agree and d["solved"] == solved and d["nodes"] == nodes
+             and d["expired"] == expired)
     if d["solved"]:
         agree = agree and len(d["history"]) == plies
 check("solve_batch agrees with sequential solve", agree)
+tight = ax.solve_batch([batch_states[0]], 100000, 24, 3, "", 1)
+check("expired flag surfaces censoring", tight[0][3] in (True, False))
 
 # ---- frontier_eval (relay -4 ask 4: the pincer inner loop)
 

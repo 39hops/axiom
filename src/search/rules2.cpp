@@ -451,6 +451,27 @@ std::vector<expr> i_inverse_trig(const expr& node) {
               nume / sqrt_of(a * b) *
                   expr::fn("atan", x * sqrt_of(a / b))};
     }
+    // completed-square atan (E4 audit): den = a*x^2 + b*x + c with a>0
+    // and negative discriminant — int 1/den = 2*atan((2ax+b)/s)/s,
+    // s = sqrt(4ac - b^2). sqrt_of keeps perfect squares rational; the
+    // canonical sqrt-content pre-pass makes irrational s verifiable.
+    if (ok && pd.degree() == 2 && !(pd.coeff(1) == kZero) &&
+        kZero < pd.coeff(2)) {
+      const ax::rational a = pd.coeff(2);
+      const ax::rational b = pd.coeff(1);
+      const ax::rational c = pd.coeff(0);
+      const ax::rational disc =
+          ax::rational(ax::bigint(4)) * a * c - b * b;
+      if (kZero < disc) {
+        const expr s = sqrt_of(disc);
+        const expr arg =
+            (expr::num(ax::rational(ax::bigint(2)) * a) * x +
+             expr::num(b)) /
+            s;
+        return {poly_part +
+                nume * expr::num(2) / s * expr::fn("atan", arg)};
+      }
+    }
   }
   // sqrt form: den = co * sqrt(b - a*x^2), a>0, b>0
   {
@@ -488,6 +509,24 @@ std::vector<expr> i_inverse_trig(const expr& node) {
         if (kZero < a && kZero < b)
           return {nume / (co * sqrt_of(a)) *
                   expr::fn("asin", x * sqrt_of(a / b))};
+      }
+      // completed-square asin (E4 audit): radicand = c + b*x - a*x^2,
+      // a>0, positive discriminant — int 1/sqrt(.) =
+      // asin((2ax - b)/sqrt(b^2 + 4ac))/sqrt(a).
+      if (q.degree() == 2 && !(q.coeff(1) == kZero) &&
+          q.coeff(2) < kZero) {
+        const ax::rational a = -q.coeff(2);
+        const ax::rational b = q.coeff(1);
+        const ax::rational c = q.coeff(0);
+        const ax::rational disc =
+            b * b + ax::rational(ax::bigint(4)) * a * c;
+        if (kZero < disc) {
+          const expr arg =
+              (expr::num(ax::rational(ax::bigint(2)) * a) * x -
+               expr::num(b)) /
+              sqrt_of(disc);
+          return {nume / (co * sqrt_of(a)) * expr::fn("asin", arg)};
+        }
       }
     }
   }

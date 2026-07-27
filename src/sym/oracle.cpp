@@ -13,7 +13,9 @@
 #include <cstdlib>
 #include <map>
 #include <numbers>
+#include <optional>
 #include <set>
+#include <utility>
 #include <iostream>
 #include <string>
 
@@ -241,11 +243,210 @@ bool has_tan(const expr& e) {
   return false;
 }
 
+// ---- sqrt content normalization (E4 21-miss audit, the asin/atan
+// spelling class): sqrt(q * prim) with rational content q pulls the
+// content out — sqrt(1 - x**2/9) -> sqrt(9 - x**2)/3, sqrt(2/3) ->
+// sqrt(6)/3, sqrt(9/4) -> 3/2. Without this the inverse-trig
+// diff-backs never merge with the integrand spelling and every
+// non-unit-radius asin/atan edge dies UNDECIDED (measured:
+// Integral(1/sqrt(9 - x**2)) -> asin(x/3) rejected by verify_edge).
+// Changed-tracking rebuilds only (the untan lesson: an unconditional
+// rebuild perturbs as_ratio term ordering).
+
+std::optional<long long> small_ll(const ax::bigint& b) {
+  const std::string s = b.to_string();
+  if (s.size() > 18) return std::nullopt;
+  return std::stoll(s);
+}
+
+/** Exact square root of a nonnegative bigint (nullopt if not square
+    or too large to check cheaply). */
+std::optional<ax::bigint> exact_sqrt(const ax::bigint& n) {
+  const auto v = small_ll(n);
+  if (!v || *v < 0) return std::nullopt;
+  const auto r = static_cast<long long>(std::llround(std::sqrt(
+      static_cast<double>(*v))));
+  for (long long c : {r - 1, r, r + 1})
+    if (c >= 0 && c * c == *v) return ax::bigint(c);
+  return std::nullopt;
+}
+
+ax::rational rat_pow(const ax::rational& q, long long k) {
+  ax::rational out{ax::bigint(1)};
+  const ax::rational base = k >= 0 ? q : ax::rational(q.den(), q.num());
+  for (long long i = 0; i < (k >= 0 ? k : -k); ++i) out = out * base;
+  return out;
+}
+
+/** Normalize q^(k/2) for positive rational q = n/d: returns
+    (radicand, multiplier) with q^(k/2) == radicand^(k/2) * multiplier,
+    radicand a squarefree-content INTEGER (or 1 when the radical
+    resolves exactly). Nullopt = leave unchanged. */
+std::optional<std::pair<ax::rational, ax::rational>> sqrt_split(
+    const ax::rational& q, long long k) {
+  if (!(ax::rational{} < q)) return std::nullopt;  // nonpositive: keep
+  const auto pn = exact_sqrt(q.num());
+  const auto pd = exact_sqrt(q.den());
+  if (pn && pd)  // perfect square: radical resolves to a rational
+    return std::make_pair(ax::rational(ax::bigint(1)),
+                          rat_pow(ax::rational(*pn, *pd), k));
+  if (q.den() == ax::bigint(1)) return std::nullopt;  // integer: keep
+  // (n/d)^(k/2) = (n*d)^(k/2) * d^(-k)
+  return std::make_pair(ax::rational(q.num() * q.den(), ax::bigint(1)),
+                        rat_pow(ax::rational(q.den(), ax::bigint(1)), -k));
+}
+
+/** Positive rational content of an Add (gcd of term coefficients). */
+ax::rational add_content(const expr& u) {
+  ax::bigint gn{0}, ld{1};
+  for (const expr& t : u.args()) {
+    ax::rational c{ax::bigint(1)};
+    if (t.is_num()) {
+      c = t.value();
+    } else if (t.is_mul()) {
+      for (const expr& f : t.args())
+        if (f.is_num()) c = c * f.value();
+    }
+    gn = ax::gcd(gn, c.num());
+    ld = ld / ax::gcd(ld, c.den()) * c.den();  // lcm
+  }
+  if (gn.is_zero()) return ax::rational(ax::bigint(1));
+  return ax::rational(gn, ld);
+}
+
+expr sqrt_norm(const expr& e) {
+  check_work_budget();
+  const auto rebuild_radical = [&](const expr& base, const expr& expo,
+                                   bool fn_spelling) -> std::optional<expr> {
+    // expo = k/2 (den == 2) for pow spelling; k = 1 for fn sqrt
+    long long k = 1;
+    if (!fn_spelling) {
+      if (!expo.is_num() || !(expo.value().den() == ax::bigint(2)))
+        return std::nullopt;
+      const auto kk = small_ll(expo.value().num());
+      if (!kk) return std::nullopt;
+      k = *kk;
+    }
+    ax::rational q;
+    expr prim = expr::num(1);
+    bool has_prim = false;
+    if (base.is_num()) {
+      q = base.value();
+    } else if (base.is_add() || base.is_mul()) {
+      // expand first: diff spellings keep pow-of-mul shapes like
+      // -(x/3)**2 whose 1/9 hides INSIDE the pow (measured: the asin
+      // diff-back stayed UNDECIDED with content extraction alone)
+      const expr xb = expand(base);
+      if (xb.is_add()) {
+        q = add_content(xb);
+        if (q == ax::rational(ax::bigint(1))) return std::nullopt;
+        prim = xb / expr::num(q);
+        has_prim = true;
+      } else if (xb.is_mul()) {
+        // numeric coefficient times a non-add rest
+        q = ax::rational(ax::bigint(1));
+        expr rest = expr::num(1);
+        for (const expr& g : xb.args()) {
+          if (g.is_num()) q = q * g.value();
+          else rest = rest * g;
+        }
+        if (q == ax::rational(ax::bigint(1))) return std::nullopt;
+        prim = rest;
+        has_prim = true;
+      } else {
+        return std::nullopt;
+      }
+    } else {
+      return std::nullopt;
+    }
+    const auto split = sqrt_split(q, k);
+    if (!split) return std::nullopt;
+    const auto& [rad, mult] = *split;
+    expr out = expr::num(mult);
+    if (!(rad == ax::rational(ax::bigint(1)))) {
+      const expr rb = expr::num(rad);
+      out = out * (fn_spelling ? expr::fn("sqrt", rb)
+                               : rb.pow(expo));
+    } else if (has_prim && k != 1 && !fn_spelling) {
+      // radical content fully resolved; prim keeps the exponent below
+    }
+    if (has_prim)
+      out = out * (fn_spelling ? expr::fn("sqrt", prim)
+                               : prim.pow(expo));
+    return out;
+  };
+
+  switch (e.k()) {
+    case kind::num:
+    case kind::sym:
+      return e;
+    case kind::fn: {
+      if (e.name() == "sqrt") {
+        const expr inner = sqrt_norm(e.args()[0]);
+        if (const auto r = rebuild_radical(inner, expr::num(1), true))
+          return *r;
+        if (!inner.same(e.args()[0])) return expr::fn("sqrt", inner);
+        return e;
+      }
+      std::vector<expr> mapped;
+      mapped.reserve(e.args().size());
+      bool changed = false;
+      for (const expr& a : e.args()) {
+        mapped.push_back(sqrt_norm(a));
+        changed = changed || !mapped.back().same(a);
+      }
+      if (!changed) return e;
+      return expr::fn(e.name(), std::move(mapped));
+    }
+    case kind::add: {
+      expr out = expr::num(0);
+      bool changed = false;
+      for (const expr& t : e.args()) {
+        const expr m = sqrt_norm(t);
+        changed = changed || !m.same(t);
+        out = out + m;
+      }
+      return changed ? out : e;
+    }
+    case kind::mul: {
+      expr out = expr::num(1);
+      bool changed = false;
+      for (const expr& g : e.args()) {
+        const expr m = sqrt_norm(g);
+        changed = changed || !m.same(g);
+        out = out * m;
+      }
+      return changed ? out : e;
+    }
+    case kind::pow: {
+      const expr b = sqrt_norm(e.args()[0]);
+      const expr x2 = sqrt_norm(e.args()[1]);
+      if (const auto r = rebuild_radical(b, x2, false)) return *r;
+      if (b.same(e.args()[0]) && x2.same(e.args()[1])) return e;
+      return b.pow(x2);
+    }
+  }
+  return e;
+}
+
+bool has_half_pow(const expr& e) {
+  if (e.is_fn() && e.name() == "sqrt") return true;
+  if (e.is_pow() && e.args()[1].is_num() &&
+      e.args()[1].value().den() == ax::bigint(2))
+    return true;
+  for (const expr& a : e.args())
+    if (has_half_pow(a)) return true;
+  return false;
+}
+
 expr canonical_impl(const expr& e0, const expr& x, bool use_trial) {
   // untan rebuilds through the operator overloads, so it must run ONLY
   // when a tan is actually present — otherwise it perturbs the term
   // ordering as_ratio relies on (regressed a sqrt-recombination row).
-  const expr e = has_tan(e0) ? untan(e0) : e0;
+  const expr e1 = has_tan(e0) ? untan(e0) : e0;
+  // sqrt content pre-pass, same guard discipline as untan: fires only
+  // when a radical is actually present
+  const expr e = has_half_pow(e1) ? sqrt_norm(e1) : e1;
   ratio r = as_ratio(e, x);
   // factored-form cancellation BEFORE expand: hash-consing makes shared
   // factors (incl. radical sums like 2*sqrt(x)+sqrt(5)) pointer-equal

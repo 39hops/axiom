@@ -417,7 +417,8 @@ PYBIND11_MODULE(axiom_sym, m) {
         const se::rule_set& rules = se::default_rules();  // pure native
         std::optional<se::markov_prior> prior;
         if (!prior_tsv.empty()) prior = se::markov_prior::load_tsv(prior_tsv);
-        std::vector<std::tuple<bool, int, long long>> out(states.size());
+        std::vector<std::tuple<bool, int, long long, bool>> out(
+            states.size());
         {
           // no Python callables anywhere below: release for the batch
           py::gil_scoped_release run_without_gil;
@@ -440,10 +441,12 @@ PYBIND11_MODULE(axiom_sym, m) {
                   opt.deadline = std::chrono::steady_clock::now() +
                                  std::chrono::milliseconds(deadline_ms);
                 const auto res = se::beam_search(states[i], rules, opt);
-                out[i] = {res.solved, res.best.plies, res.nodes};
+                out[i] = {res.solved, res.best.plies, res.nodes,
+                          res.deadline_expired};
               } catch (const std::exception&) {
-                // one bad state costs one label, never the batch
-                out[i] = {false, 0, 0};
+                // one bad state costs one label, never the batch;
+                // a crash is censoring too, never a fact
+                out[i] = {false, 0, 0, true};
               }
             }));
           for (auto& f : futs) f.get();
@@ -453,16 +456,18 @@ PYBIND11_MODULE(axiom_sym, m) {
       py::arg("states"), py::arg("budget") = 150, py::arg("plies") = 24,
       py::arg("width") = 3, py::arg("prior_tsv") = std::string(),
       py::arg("deadline_ms") = 8000, py::arg("threads") = 0,
-      "Native batch value-labeling (relay 2026-07-27-2 ask 1): "
-      "[(solved, plies, nodes)] per state, pool-parallel with the GIL "
-      "released for the whole batch (threads=0 -> hardware "
-      "concurrency). Pure native rules — no slots — so labels are "
-      "deterministic given (budget, plies, width, prior); the "
-      "deadline_ms wall is a safety net whose expiries are the only "
-      "load-dependent outcomes (expired searches report solved=False). "
-      "PARITY FENCE: cache these labels under engine=axiom unless the "
-      "agreement gate vs the python solver passes — the two label "
-      "families never mix.");
+      "Native batch value-labeling: [(solved, plies, nodes, expired)] "
+      "per state, pool-parallel with the GIL released (threads=0 -> "
+      "hardware concurrency). expired=True means the wall (or a crash) "
+      "CENSORED the search — solved=False is then censoring, not a "
+      "fact, and must never fossilize into a value cache (E4 "
+      "amendment). PLY SEMANTICS: plies == len(history) == every "
+      "accepted engine move, INCLUDING whole-expression algebra moves "
+      "(cancel / expand / subs_eval); llmopt's carrier-rewrite count = "
+      "plies minus those entries. Pure native rules, deterministic "
+      "given (budget, plies, width, prior). PARITY FENCE: E4 FAILED — "
+      "labels live under engine=axiom permanently for now; the two "
+      "label families never mix.");
 
   m.def(
       "predecessors",
@@ -728,7 +733,9 @@ PYBIND11_MODULE(axiom_sym, m) {
   //   2 = + verify_edge, dead_mask, dead_reason, solve_batch,
   //       predecessors (relays 2026-07-27-0 / -2)
   //   3 = + frontier_eval, gate_battery (relay 2026-07-27-4)
-  m.attr("INTERFACE_VERSION") = 3;
+  //   4 = solve_batch rows gain the expired flag: (solved, plies,
+  //       nodes, expired) — BREAKING; censored != fact (E4 amendment)
+  m.attr("INTERFACE_VERSION") = 4;
   m.attr("INTERFACE") = py::make_tuple(
       "parse_sstr", "diff", "canonical", "equivalent",
       "equivalent_mod_const", "verify_edge", "dead_mask", "dead_reason",

@@ -4,7 +4,9 @@
 #include <ax/sym/expand.hpp>
 #include <ax/sym/oracle.hpp>
 
+#include <functional>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -254,6 +256,16 @@ std::vector<expr> i_table(const expr& node) {
     if (f.name() == "exp") return {expr::fn("exp", x)};
     if (f.name() == "log")  // the invisible-*1 by-parts case
       return {x * expr::fn("log", x) - x};
+    // inverse-trig invisible-*1 by-parts closers (E4 21-miss audit:
+    // Integral(asin(x)) / Integral(atan(x)) were unreachable)
+    const expr one = expr::num(1);
+    if (f.name() == "asin")
+      return {x * f + expr::fn("sqrt", one - x.pow(expr::num(2)))};
+    if (f.name() == "acos")
+      return {x * f - expr::fn("sqrt", one - x.pow(expr::num(2)))};
+    if (f.name() == "atan")
+      return {x * f -
+              expr::fn("log", x.pow(expr::num(2)) + one) / expr::num(2)};
   }
   return {};
 }
@@ -262,7 +274,15 @@ std::vector<expr> i_table(const expr& node) {
     order, deduped by handle, must contain x and differ from x. */
 void usub_candidates(const expr& f, const expr& x, std::vector<expr>& out) {
   if (f.is_fn()) out.push_back(f.args()[0]);
-  if (f.is_pow()) out.push_back(f.args()[0]);
+  if (f.is_pow()) {
+    out.push_back(f.args()[0]);
+    // even-power halving (E4 audit: x/(x**4 + 1) needs u = x**2, which
+    // is never a subtree of pow(x, 4))
+    if (f.args()[0].same(x) && f.args()[1].is_num() &&
+        f.args()[1].value().den() == ax::bigint(1) &&
+        ax::rational(ax::bigint(2)) < f.args()[1].value())
+      out.push_back(x.pow(expr::num(2)));
+  }
   for (const expr& a : f.args()) usub_candidates(a, x, out);
 }
 
@@ -288,9 +308,56 @@ std::vector<expr> i_usub(const expr& node) {
     // target must be matched in BOTH spellings (measured: every
     // sqrt-argument u-sub chain in the L4 worklist missed because the
     // original g node no longer existed after canonicalization).
+    // Power-divisible fallback (E4 audit): u = x**m never appears as a
+    // subtree of x**(k*m) (canonical keeps pow(x, k*m) flat), so
+    // substitute pow-wise when every power of x divides m.
+    const std::function<expr(const expr&, long long)> subst_pow =
+        [&](const expr& q, long long m) -> expr {
+      if (q.is_pow() && q.args()[0].same(x) && q.args()[1].is_num() &&
+          q.args()[1].value().den() == ax::bigint(1)) {
+        const auto n = q.args()[1].value();
+        const ax::rational md{ax::bigint(m)};
+        const ax::rational quo = n / md;
+        if (quo.den() == ax::bigint(1))
+          return kU.pow(expr::num(quo));
+        return q;
+      }
+      switch (q.k()) {
+        case sym::kind::fn: {
+          std::vector<expr> mapped;
+          for (const expr& a : q.args()) mapped.push_back(subst_pow(a, m));
+          return expr::fn(q.name(), std::move(mapped));
+        }
+        case sym::kind::add: {
+          expr o = expr::num(0);
+          for (const expr& t : q.args()) o = o + subst_pow(t, m);
+          return o;
+        }
+        case sym::kind::mul: {
+          expr o = expr::num(1);
+          for (const expr& f2 : q.args()) o = o * subst_pow(f2, m);
+          return o;
+        }
+        case sym::kind::pow:
+          return subst_pow(q.args()[0], m).pow(subst_pow(q.args()[1], m));
+        default:
+          return q;
+      }
+    };
     const auto match = [&](const expr& fq) -> std::optional<expr> {
       expr q = replace_subtree(fq, g, kU);
       if (contains(q, x)) q = replace_subtree(q, sym::canonical(g, x), kU);
+      if (contains(q, x) && g.is_pow() && g.args()[0].same(x) &&
+          g.args()[1].is_num() &&
+          g.args()[1].value().den() == ax::bigint(1)) {
+        if (const auto m = [&]() -> std::optional<long long> {
+              const std::string s = g.args()[1].value().num().to_string();
+              if (s.size() > 9) return std::nullopt;
+              return std::stoll(s);
+            }();
+            m && *m >= 2)
+          q = subst_pow(fq, *m);
+      }
       if (contains(q, x) || !contains(q, kU)) return std::nullopt;
       return q;
     };

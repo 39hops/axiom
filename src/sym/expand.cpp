@@ -81,6 +81,19 @@ expr expand(const expr& e) {
         for (int i = 1; i < k; ++i) prod = mul_distribute(prod, base);
         return prod;
       }
+      // integer power of a MUL distributes over the factors: (a*b)^n
+      // -> a^n * b^n (E4 audit: diff-backs carry closed shapes like
+      // (x*sqrt(6)/3)**2 that block every polynomial normalization
+      // downstream — canonical never saw 2*x**2/3 + 1 as a rational).
+      // Any integer n is valid; each factor power re-enters expand.
+      if (k != 0 && base.is_mul()) {
+        expr prod = expr::num(1);
+        for (const expr& f : base.args()) {
+          check_work_budget();
+          prod = mul_distribute(prod, expand(f.pow(ex)));
+        }
+        return prod;
+      }
       return base.pow(ex);
     }
   }
