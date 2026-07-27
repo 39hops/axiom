@@ -59,6 +59,7 @@ add_executable(ax_tests
   pyrand/pyrand_test.cpp
   mathgen/expression_test.cpp
   mathgen/ode_test.cpp
+  mathgen/ntchain_test.cpp
   search/chassis_test.cpp
   search/rules_test.cpp
   search/emit_test.cpp

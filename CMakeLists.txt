@@ -63,6 +63,7 @@ add_library(axiom STATIC
   src/zx/rules.cpp
   src/zx/serialize.cpp
   src/mathgen/zxchain.cpp
+  src/mathgen/ntchain.cpp
 )
 target_include_directories(axiom PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(axiom PUBLIC cxx_std_23)
@@ -130,3 +131,6 @@ target_link_libraries(axiom-nn-logits PRIVATE axiom)
 
 add_executable(axiom-nn-exact tools/nn_exact_main.cpp)
 target_link_libraries(axiom-nn-exact PRIVATE axiom)
+
+add_executable(axiom-nt-chain tools/nt_chain_main.cpp)
+target_link_libraries(axiom-nt-chain PRIVATE axiom)
