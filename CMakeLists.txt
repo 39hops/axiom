@@ -38,6 +38,7 @@ add_library(axiom STATIC
   src/sym/count_ops.cpp
   src/sym/series.cpp
   src/sym/series_oracle.cpp
+  src/sym/risch.cpp
   src/search/verify.cpp
   src/search/successors.cpp
   src/search/beam.cpp
@@ -118,3 +119,6 @@ target_link_libraries(axiom-zx-chain PRIVATE axiom)
 
 add_executable(axiom-inverse-gate tools/inverse_gate_main.cpp)
 target_link_libraries(axiom-inverse-gate PRIVATE axiom)
+
+add_executable(axiom-boards tools/boards_main.cpp)
+target_link_libraries(axiom-boards PRIVATE axiom)

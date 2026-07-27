@@ -16,6 +16,7 @@
 #include <ax/sym/oracle.hpp>
 #include <ax/sym/parse.hpp>
 #include <ax/sym/print.hpp>
+#include <ax/sym/risch.hpp>
 
 #include <pybind11/stl.h>
 
@@ -144,6 +145,25 @@ PYBIND11_MODULE(axiom_sym, m) {
       "oracle CI node (relay 2026-07-27-0 ask 2): a verifier bug would "
       "fossilize into persistent value-cache labels, so this exact "
       "gate is what must be fuzzed, not a reimplementation.");
+
+  m.def(
+      "dead_mask",
+      [](const std::vector<sym::expr>& states) {
+        return sym::dead_state_mask(states);
+      },
+      py::arg("states"), py::call_guard<py::gil_scoped_release>(),
+      "Magic boards r2 batch API (S5 masks enumerated sets BEFORE "
+      "scoring): list of states -> list of bools, mask[i] true iff "
+      "states[i] is Risch-certified dead (non-elementary component "
+      "that no value-preserving move can cancel). Conservative: "
+      "undecided shapes are never masked. Pure exact arithmetic, no "
+      "oracle calls; safe to batch large candidate sets.");
+
+  m.def(
+      "dead_reason",
+      [](const sym::expr& state) { return sym::dead_state(state).reason; },
+      py::arg("state"), py::call_guard<py::gil_scoped_release>(),
+      "Certificate tag for a dead state ('' when not certified).");
 
   // ----------------------------------------------------------- solver
   // Hybrid-config entry: the native engine with llmopt's external slots
