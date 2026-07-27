@@ -40,6 +40,7 @@ add_library(axiom STATIC
   src/sym/series_oracle.cpp
   src/sym/risch.cpp
   src/nn/model.cpp
+  src/nn/exact.cpp
   src/search/verify.cpp
   src/search/successors.cpp
   src/search/beam.cpp
@@ -126,3 +127,6 @@ target_link_libraries(axiom-boards PRIVATE axiom)
 
 add_executable(axiom-nn-logits tools/nn_logits_main.cpp)
 target_link_libraries(axiom-nn-logits PRIVATE axiom)
+
+add_executable(axiom-nn-exact tools/nn_exact_main.cpp)
+target_link_libraries(axiom-nn-exact PRIVATE axiom)

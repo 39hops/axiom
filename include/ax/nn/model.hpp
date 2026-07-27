@@ -31,6 +31,7 @@
 #include <cstddef>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ax::nn {
@@ -50,6 +51,11 @@ struct tensor {
   std::vector<std::size_t> dims;
   std::vector<float> data;
 };
+
+/** Raw container read (config + all tensors, no validation) — shared
+    by model::load and the FX-V1 exact loader. */
+std::pair<config, std::map<std::string, tensor>> load_container(
+    const std::string& path);
 
 class model {
  public:

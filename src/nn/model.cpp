@@ -125,7 +125,8 @@ void model::validate() const {
   if (t_.count("head.weight")) need("head.weight", V, D);
 }
 
-model model::load(const std::string& path) {
+std::pair<config, std::map<std::string, tensor>> load_container(
+    const std::string& path) {
   std::ifstream in(path, std::ios::binary);
   if (!in.good()) throw std::runtime_error("axnn: cannot open " + path);
   if (read_str(in, 4) != "AXNN")
@@ -135,20 +136,21 @@ model model::load(const std::string& path) {
   const auto cfg_len = read_pod<std::uint32_t>(in);
   const auto cfg_json = sym::jsonl::parse_line(read_str(in, cfg_len));
 
-  model m;
-  m.cfg_.d_model = cfg_int(cfg_json, "d_model");
-  m.cfg_.n_layers = cfg_int(cfg_json, "n_layers");
-  m.cfg_.n_heads = cfg_int(cfg_json, "n_heads");
-  m.cfg_.d_ff = cfg_int(cfg_json, "d_ff");
-  m.cfg_.vocab = cfg_int(cfg_json, "vocab");
-  m.cfg_.max_seq = cfg_int(cfg_json, "max_seq");
-  m.cfg_.norm = cfg_str(cfg_json, "norm", "layernorm");
-  m.cfg_.act = cfg_str(cfg_json, "act", "gelu");
-  m.cfg_.pos = cfg_str(cfg_json, "pos", "learned");
-  m.cfg_.rope_style = cfg_str(cfg_json, "rope_style", "half");
-  m.cfg_.eps = cfg_num(cfg_json, "eps", 1e-5);
-  m.cfg_.rope_theta = cfg_num(cfg_json, "rope_theta", 10000.0);
+  config cfg;
+  cfg.d_model = cfg_int(cfg_json, "d_model");
+  cfg.n_layers = cfg_int(cfg_json, "n_layers");
+  cfg.n_heads = cfg_int(cfg_json, "n_heads");
+  cfg.d_ff = cfg_int(cfg_json, "d_ff");
+  cfg.vocab = cfg_int(cfg_json, "vocab");
+  cfg.max_seq = cfg_int(cfg_json, "max_seq");
+  cfg.norm = cfg_str(cfg_json, "norm", "layernorm");
+  cfg.act = cfg_str(cfg_json, "act", "gelu");
+  cfg.pos = cfg_str(cfg_json, "pos", "learned");
+  cfg.rope_style = cfg_str(cfg_json, "rope_style", "half");
+  cfg.eps = cfg_num(cfg_json, "eps", 1e-5);
+  cfg.rope_theta = cfg_num(cfg_json, "rope_theta", 10000.0);
 
+  std::map<std::string, tensor> tensors;
   while (in.peek() != std::ifstream::traits_type::eof()) {
     const auto name_len = read_pod<std::uint32_t>(in);
     const std::string name = read_str(in, name_len);
@@ -168,8 +170,16 @@ model model::load(const std::string& path) {
     in.read(reinterpret_cast<char*>(t.data.data()),
             static_cast<std::streamsize>(total * sizeof(float)));
     if (!in) throw std::runtime_error("axnn: truncated tensor " + name);
-    m.t_.emplace(name, std::move(t));
+    tensors.emplace(name, std::move(t));
   }
+  return {cfg, std::move(tensors)};
+}
+
+model model::load(const std::string& path) {
+  auto [cfg, tensors] = load_container(path);
+  model m;
+  m.cfg_ = std::move(cfg);
+  m.t_ = std::move(tensors);
   m.validate();
   return m;
 }
