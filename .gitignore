@@ -14,3 +14,5 @@ o.err
 logs/
 *.log
 __pycache__/
+!data/priors/
+!data/priors/**

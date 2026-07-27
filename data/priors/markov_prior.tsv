@@ -1,0 +1,206 @@
+U	cancel	70
+U	d_chain_table	205
+U	d_const	444
+U	d_const_factor	200
+U	d_power	162
+U	d_product	328
+U	d_sum	100
+U	d_x	317
+U	expand	29
+U	factor	13
+U	i_ansatz_exp	4
+U	i_apart	3
+U	i_const	111
+U	i_const_factor	156
+U	i_linear_basis	74
+U	i_parts	17
+U	i_power	102
+U	i_sum	86
+U	i_table	72
+U	i_unprod	22
+U	i_usub	41
+U	powsimp	10
+U	together	22
+U	trigsimp	6
+B	cancel	i_const	8
+B	cancel	i_const_factor	3
+B	cancel	i_parts	1
+B	cancel	i_power	34
+B	cancel	i_table	24
+B	d_chain_table	d_chain_table	23
+B	d_chain_table	d_const	3
+B	d_chain_table	d_const_factor	16
+B	d_chain_table	d_power	17
+B	d_chain_table	d_product	12
+B	d_chain_table	d_sum	13
+B	d_chain_table	d_x	112
+B	d_chain_table	together	7
+B	d_chain_table	trigsimp	2
+B	d_const	d_chain_table	95
+B	d_const	d_const	56
+B	d_const	d_const_factor	42
+B	d_const	d_power	84
+B	d_const	d_product	109
+B	d_const	d_sum	20
+B	d_const	d_x	29
+B	d_const	expand	3
+B	d_const	factor	1
+B	d_const	i_const	1
+B	d_const	together	4
+B	d_const_factor	d_chain_table	32
+B	d_const_factor	d_const	25
+B	d_const_factor	d_const_factor	43
+B	d_const_factor	d_power	43
+B	d_const_factor	d_product	7
+B	d_const_factor	d_sum	13
+B	d_const_factor	d_x	28
+B	d_const_factor	expand	8
+B	d_const_factor	trigsimp	1
+B	d_power	d_chain_table	16
+B	d_power	d_const	1
+B	d_power	d_const_factor	4
+B	d_power	d_power	6
+B	d_power	d_product	24
+B	d_power	d_x	110
+B	d_power	trigsimp	1
+B	d_product	d_chain_table	14
+B	d_product	d_const	263
+B	d_product	d_power	4
+B	d_product	d_product	9
+B	d_product	d_sum	4
+B	d_product	d_x	28
+B	d_product	expand	3
+B	d_product	factor	1
+B	d_product	i_usub	1
+B	d_product	together	1
+B	d_sum	d_chain_table	2
+B	d_sum	d_const	28
+B	d_sum	d_const_factor	18
+B	d_sum	d_power	4
+B	d_sum	d_product	46
+B	d_sum	d_x	1
+B	d_sum	expand	1
+B	d_x	d_chain_table	13
+B	d_x	d_const	62
+B	d_x	d_const_factor	65
+B	d_x	d_power	2
+B	d_x	d_product	100
+B	d_x	d_sum	46
+B	d_x	d_x	8
+B	d_x	expand	2
+B	d_x	factor	9
+B	d_x	i_const_factor	1
+B	d_x	powsimp	3
+B	d_x	together	5
+B	d_x	trigsimp	1
+B	expand	cancel	8
+B	expand	d_chain_table	1
+B	expand	d_const	1
+B	expand	d_const_factor	2
+B	expand	d_power	2
+B	expand	d_product	6
+B	expand	d_sum	3
+B	expand	factor	1
+B	expand	i_const	1
+B	expand	i_const_factor	2
+B	expand	i_parts	1
+B	expand	powsimp	1
+B	factor	d_const_factor	3
+B	factor	d_product	2
+B	factor	d_x	1
+B	factor	i_parts	1
+B	factor	powsimp	6
+B	i_ansatz_exp	i_const_factor	1
+B	i_ansatz_exp	i_linear_basis	3
+B	i_apart	i_sum	3
+B	i_const	cancel	20
+B	i_const	expand	5
+B	i_const	i_apart	1
+B	i_const	i_const	14
+B	i_const	i_const_factor	41
+B	i_const	i_linear_basis	2
+B	i_const	i_power	1
+B	i_const	i_sum	22
+B	i_const	i_table	3
+B	i_const	i_unprod	1
+B	i_const	i_usub	1
+B	i_const_factor	cancel	8
+B	i_const_factor	expand	3
+B	i_const_factor	i_ansatz_exp	1
+B	i_const_factor	i_apart	1
+B	i_const_factor	i_const	8
+B	i_const_factor	i_const_factor	13
+B	i_const_factor	i_linear_basis	9
+B	i_const_factor	i_parts	5
+B	i_const_factor	i_power	51
+B	i_const_factor	i_sum	21
+B	i_const_factor	i_table	16
+B	i_const_factor	i_unprod	1
+B	i_const_factor	i_usub	19
+B	i_linear_basis	cancel	1
+B	i_linear_basis	i_ansatz_exp	2
+B	i_linear_basis	i_apart	1
+B	i_linear_basis	i_const	1
+B	i_linear_basis	i_const_factor	12
+B	i_linear_basis	i_linear_basis	38
+B	i_linear_basis	i_sum	2
+B	i_linear_basis	i_unprod	15
+B	i_linear_basis	i_usub	1
+B	i_parts	i_const	3
+B	i_parts	i_const_factor	4
+B	i_parts	i_sum	1
+B	i_parts	i_table	6
+B	i_parts	i_usub	3
+B	i_power	cancel	8
+B	i_power	i_const	34
+B	i_power	i_const_factor	19
+B	i_power	i_linear_basis	2
+B	i_power	i_power	9
+B	i_power	i_sum	19
+B	i_power	i_table	6
+B	i_power	i_unprod	2
+B	i_power	i_usub	2
+B	i_sum	cancel	15
+B	i_sum	i_const	34
+B	i_sum	i_const_factor	28
+B	i_sum	i_parts	4
+B	i_sum	i_power	2
+B	i_sum	i_usub	3
+B	i_table	cancel	8
+B	i_table	expand	1
+B	i_table	i_const	5
+B	i_table	i_const_factor	10
+B	i_table	i_linear_basis	2
+B	i_table	i_parts	5
+B	i_table	i_power	5
+B	i_table	i_sum	14
+B	i_table	i_table	14
+B	i_table	i_usub	7
+B	i_unprod	cancel	1
+B	i_unprod	i_ansatz_exp	1
+B	i_unprod	i_const	1
+B	i_unprod	i_const_factor	5
+B	i_unprod	i_linear_basis	7
+B	i_unprod	i_sum	3
+B	i_unprod	i_unprod	3
+B	i_unprod	trigsimp	1
+B	i_usub	cancel	1
+B	i_usub	expand	3
+B	i_usub	factor	1
+B	i_usub	i_const	1
+B	i_usub	i_const_factor	16
+B	i_usub	i_linear_basis	11
+B	i_usub	i_sum	1
+B	i_usub	i_table	3
+B	i_usub	i_usub	4
+B	powsimp	d_chain_table	3
+B	powsimp	d_const	2
+B	powsimp	d_product	1
+B	powsimp	together	4
+B	together	d_chain_table	3
+B	together	d_const_factor	6
+B	together	d_product	12
+B	together	d_sum	1
+B	trigsimp	d_chain_table	3
+B	trigsimp	d_const	2
+B	trigsimp	i_const_factor	1
