@@ -130,6 +130,21 @@ PYBIND11_MODULE(axiom_sym, m) {
       "Antiderivative check by differentiation: is d candidate/d var "
       "equivalent to integrand?");
 
+  m.def(
+      "verify_edge",
+      [](const sym::expr& parent, const sym::expr& child) {
+        return ax::search::verify_edge(
+            parent, child, ax::search::default_rules().external);
+      },
+      py::arg("parent"), py::arg("child"),
+      py::call_guard<py::gil_scoped_release>(),
+      "The production edge oracle exactly as the search pays it "
+      "(pure-native external slots: UNDECIDED rejects). True iff the "
+      "move parent -> child is accepted. Exposed for the fuzz-the-"
+      "oracle CI node (relay 2026-07-27-0 ask 2): a verifier bug would "
+      "fossilize into persistent value-cache labels, so this exact "
+      "gate is what must be fuzzed, not a reimplementation.");
+
   // ----------------------------------------------------------- solver
   // Hybrid-config entry: the native engine with llmopt's external slots
   // served as Python callables (llmopt/search/axiom_slots.py contract:

@@ -61,6 +61,7 @@ add_executable(ax_tests
   search/emit_test.cpp
   search/firemask_test.cpp
   search/inverse_test.cpp
+  search/oracle_fuzz_test.cpp
   zx/zx_test.cpp
 )
 target_compile_definitions(ax_tests PRIVATE
