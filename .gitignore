@@ -10,3 +10,6 @@ data/*
 *.jsonl
 !tests/**/*.jsonl
 o.err
+# session/farm logs
+logs/
+*.log

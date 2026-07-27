@@ -47,6 +47,7 @@ add_library(axiom STATIC
   src/search/engine.cpp
   src/search/emit.cpp
   src/search/firemask.cpp
+  src/search/inverse.cpp
   src/pyrand/sha512.cpp
   src/pyrand/pyrand.cpp
   src/mathgen/problems.cpp
@@ -114,3 +115,6 @@ target_link_libraries(axiom-phys-chain PRIVATE axiom)
 
 add_executable(axiom-zx-chain tools/zx_chain_main.cpp)
 target_link_libraries(axiom-zx-chain PRIVATE axiom)
+
+add_executable(axiom-inverse-gate tools/inverse_gate_main.cpp)
+target_link_libraries(axiom-inverse-gate PRIVATE axiom)
