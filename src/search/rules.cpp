@@ -250,12 +250,20 @@ std::vector<expr> i_table(const expr& node) {
   const auto u = unpack_i(node);
   if (!u) return {};
   const auto& [f, x] = *u;
+  // tan-square closer (E4 log-constant audit): tan(x)**2 -> tan(x) - x
+  if (f.is_pow() && f.args()[1].is_num() &&
+      f.args()[1].value() == ax::rational(ax::bigint(2)) &&
+      f.args()[0].is_fn() && f.args()[0].name() == "tan" &&
+      f.args()[0].args()[0].same(x))
+    return {expr::fn("tan", x) - x};
   if (f.is_fn() && f.args().size() == 1 && f.args()[0].same(x)) {
     if (f.name() == "sin") return {-expr::fn("cos", x)};
     if (f.name() == "cos") return {expr::fn("sin", x)};
     if (f.name() == "exp") return {expr::fn("exp", x)};
     if (f.name() == "log")  // the invisible-*1 by-parts case
       return {x * expr::fn("log", x) - x};
+    if (f.name() == "tan")  // the log-constant family
+      return {-expr::fn("log", expr::fn("cos", x))};
     // inverse-trig invisible-*1 by-parts closers (E4 21-miss audit:
     // Integral(asin(x)) / Integral(atan(x)) were unreachable)
     const expr one = expr::num(1);
@@ -397,12 +405,28 @@ std::vector<expr> i_parts(const expr& node) {
   const auto& [f, x] = *u;
   std::vector<expr> out;
   const auto args = f.args();
-  for (std::size_t i = 0; i < args.size(); ++i) {
-    const expr du = sym::diff(args[i], x);
-    if (du.is_num() && du.value() == ax::rational{}) continue;
-    const expr dv = mul_except(args, i);
+  const auto emit_parts = [&](const expr& uu, const expr& dv) {
+    const expr du = sym::diff(uu, x);
+    if (du.is_num() && du.value() == ax::rational{}) return;
     const expr v = expr::integral(dv, x);
-    out.push_back(args[i] * v - expr::integral(v * du, x));
+    out.push_back(uu * v - expr::integral(v * du, x));
+  };
+  for (std::size_t i = 0; i < args.size(); ++i)
+    emit_parts(args[i], mul_except(args, i));
+  // pair-u branches (E4 log-constant audit): u = x*log(x) style
+  // composites are never single factors; bounded to x-dependent pairs
+  // (measured: 4*I(log(x)*sin(3x)) + 4*I(3x*log(x)*cos(3x)) + ... only
+  // closes through u = x*log(x), after which the emitted residual
+  // integrals cancel against the wave's other atoms by hash-consing).
+  if (args.size() >= 3) {
+    for (std::size_t i = 0; i < args.size(); ++i)
+      for (std::size_t j = i + 1; j < args.size(); ++j) {
+        if (!contains(args[i], x) || !contains(args[j], x)) continue;
+        expr rest = expr::num(1);
+        for (std::size_t m = 0; m < args.size(); ++m)
+          if (m != i && m != j) rest = rest * args[m];
+        emit_parts(args[i] * args[j], rest);
+      }
   }
   return out;
 }
