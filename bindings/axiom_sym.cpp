@@ -10,11 +10,13 @@
     NOT_EQUIVALENT / UNDECIDED; parse failures raise ValueError. */
 #include <pybind11/pybind11.h>
 
+#include <ax/nn/exact.hpp>
 #include <ax/par/pool.hpp>
 #include <ax/search/inverse.hpp>
 #include <ax/search/search.hpp>
 #include <ax/sym/calc.hpp>
 #include <ax/sym/expr.hpp>
+#include <ax/sym/jsonl.hpp>
 #include <ax/sym/oracle.hpp>
 #include <ax/sym/parse.hpp>
 #include <ax/sym/print.hpp>
@@ -22,10 +24,13 @@
 
 #include <pybind11/stl.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <fstream>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -483,6 +488,236 @@ PYBIND11_MODULE(axiom_sym, m) {
       "verify_p=1 — every returned pair is an oracle-verified legal "
       "edge (gate: 98% true-predecessor containment, 12.3ms median).");
 
+  // ------------------------------------------ relay -4: tools tranche
+  m.def(
+      "frontier_eval",
+      [](const sym::expr& state_e, py::object scorer, int verify_top_k,
+         bool use_macros, long long deadline_ms, const std::string& dir) {
+        namespace se = ax::search;
+        const auto& rules = se::default_rules();
+        std::optional<std::chrono::steady_clock::time_point> deadline;
+        if (deadline_ms > 0)
+          deadline = std::chrono::steady_clock::now() +
+                     std::chrono::milliseconds(deadline_ms);
+        // stage 1+2: enumerate (UNVERIFIED on forward: verification is
+        // deferred to post-order top-k, the R0b amplitude-ordered
+        // readout) and batch dead-mask, GIL released
+        std::vector<std::pair<std::string, sym::expr>> cands;
+        std::vector<bool> dead;
+        bool backward = dir == "backward";
+        {
+          py::gil_scoped_release run_without_gil;
+          if (backward) {
+            se::inverse_options iopt;
+            iopt.use_macros = use_macros;
+            iopt.deadline = deadline;
+            for (auto& pr : se::predecessors(state_e, rules, iopt))
+              cands.emplace_back(pr.rule, pr.p);
+          } else {
+            se::successor_options sopt;
+            sopt.use_macros = use_macros;
+            sopt.verify_p = 0.0;
+            sopt.deadline = deadline;
+            for (auto& [r, ch] :
+                 se::successors(se::state{state_e}, rules, sopt))
+              cands.emplace_back(r, ch.e);
+          }
+          std::vector<sym::expr> exprs;
+          exprs.reserve(cands.size());
+          for (const auto& [r, e] : cands) exprs.push_back(e);
+          dead = sym::dead_state_mask(exprs);
+        }
+        // stage 3: scorer slot (S2 winner's AXNN + tokenization land as
+        // the native path once the prompt format is fixed; until then
+        // the slot is a Python callable — one call over the whole set,
+        // the listwise shape)
+        std::vector<double> score(cands.size(), 0.0);
+        if (!scorer.is_none()) {
+          py::list kids;
+          for (const auto& [r, e] : cands) kids.append(to_sstr(e));
+          const py::object res = scorer(to_sstr(state_e), kids);
+          std::size_t i = 0;
+          for (const auto& item : res.cast<py::list>()) {
+            if (i >= score.size()) break;
+            score[i++] = item.cast<double>();
+          }
+        } else {
+          // no scorer yet: mass = -hce (lower hce = better state)
+          for (std::size_t i = 0; i < cands.size(); ++i)
+            score[i] = -se::hce(se::state{cands[i].second});
+        }
+        // stage 4: mass-descending order, dead states at the tail
+        std::vector<std::size_t> order(cands.size());
+        for (std::size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::stable_sort(order.begin(), order.end(),
+                         [&](std::size_t a, std::size_t b) {
+                           if (dead[a] != dead[b]) return !dead[a];
+                           return score[a] > score[b];
+                         });
+        // stage 5: verify_edge over the top-k live candidates
+        // (backward candidates are verified by construction)
+        std::vector<int> verified(cands.size(), -1);  // -1 unchecked
+        {
+          py::gil_scoped_release run_without_gil;
+          int paid = 0;
+          for (const std::size_t i : order) {
+            if (verify_top_k >= 0 && paid >= verify_top_k) break;
+            if (dead[i]) continue;
+            if (backward) {
+              verified[i] = 1;
+            } else {
+              verified[i] = se::verify_edge(state_e, cands[i].second,
+                                            rules.external)
+                                ? 1
+                                : 0;
+            }
+            ++paid;
+          }
+        }
+        py::list out;
+        for (const std::size_t i : order) {
+          py::dict row;
+          row["rule"] = cands[i].first;
+          row["state"] = cands[i].second;
+          row["sstr"] = to_sstr(cands[i].second);
+          row["dead"] = static_cast<bool>(dead[i]);
+          row["score"] = score[i];
+          row["verified"] = verified[i] < 0
+                                ? py::object(py::none())
+                                : py::object(py::bool_(verified[i] == 1));
+          out.append(row);
+        }
+        return out;
+      },
+      py::arg("state"), py::arg("scorer") = py::none(),
+      py::arg("verify_top_k") = -1, py::arg("use_macros") = true,
+      py::arg("deadline_ms") = 0, py::arg("direction") = "forward",
+      "B-b pincer inner loop as one primitive (relay -4 ask 4): "
+      "enumerate (successors, UNVERIFIED — oracle deferred) -> "
+      "dead_mask -> scorer over the set (Python slot until the S2 "
+      "winner fixes the prompt format; native AXNN path follows) -> "
+      "mass-descending order (R0b) -> verify_edge over the top-k live "
+      "candidates. direction='backward' mirrors via predecessors() "
+      "(those pairs are forward-engine-verified by construction). "
+      "verify_top_k=-1 verifies everything live; 0 verifies nothing. "
+      "Rows: {rule, state, sstr, dead, score, verified True/False/None}.");
+
+  m.def(
+      "gate_battery",
+      [](const std::string& model_path, const std::string& probes_path,
+         const std::string& token_map_path, int max_new, int stop_id,
+         bool verify) {
+        struct row_result {
+          std::string id, out;
+          bool parsed_ok = false, verified = false, has_expect = false,
+               expect_match = false;
+        };
+        std::vector<row_result> results;
+        long long verified_pass = 0, expect_pass = 0, expect_total = 0;
+        {
+          py::gil_scoped_release run_without_gil;
+          const auto nn = ax::nn::exact_model::load(model_path);
+          // ask-6 hook: the runner refuses uncertified table artifacts
+          const std::string cert = nn.certify_tables();
+          if (!cert.empty())
+            throw std::runtime_error("gate_battery: table certification "
+                                     "failed: " + cert);
+          // token map: one piece per line, id = line index; escapes
+          // \n \t \\ (vocab pieces may BE newlines)
+          std::vector<std::string> pieces;
+          {
+            std::ifstream tm(token_map_path);
+            if (!tm.good())
+              throw std::runtime_error("cannot open " + token_map_path);
+            std::string line;
+            while (std::getline(tm, line)) {
+              std::string p;
+              for (std::size_t i = 0; i < line.size(); ++i) {
+                if (line[i] == '\\' && i + 1 < line.size()) {
+                  const char c = line[++i];
+                  p += c == 'n' ? '\n' : c == 't' ? '\t' : c;
+                } else {
+                  p += line[i];
+                }
+              }
+              pieces.push_back(p);
+            }
+          }
+          std::ifstream in(probes_path);
+          if (!in.good())
+            throw std::runtime_error("cannot open " + probes_path);
+          const auto& rules = ax::search::default_rules();
+          std::string line;
+          while (std::getline(in, line)) {
+            if (line.empty()) continue;
+            const auto row = sym::jsonl::parse_line(line);
+            row_result r;
+            r.id = row.count("id") ? row.at("id")
+                                   : std::to_string(results.size());
+            std::vector<int> toks;
+            {
+              std::istringstream ss(row.at("tokens"));
+              int t;
+              while (ss >> t) toks.push_back(t);
+            }
+            const auto gen = nn.generate(toks, max_new, stop_id);
+            for (const int g : gen) {
+              if (g == stop_id) break;
+              if (g >= 0 && static_cast<std::size_t>(g) < pieces.size())
+                r.out += pieces[static_cast<std::size_t>(g)];
+            }
+            if (row.count("expect")) {
+              r.has_expect = true;
+              ++expect_total;
+              r.expect_match = r.out == row.at("expect");
+              if (r.expect_match) ++expect_pass;
+            }
+            if (verify && row.count("cur")) {
+              try {
+                const sym::expr cur = sym::parse(row.at("cur"));
+                const sym::expr nxt = sym::parse(r.out);
+                r.parsed_ok = true;
+                r.verified =
+                    ax::search::verify_edge(cur, nxt, rules.external);
+                if (r.verified) ++verified_pass;
+              } catch (const std::exception&) {
+                // unparseable decode = failed probe, booked not thrown
+              }
+            }
+            results.push_back(std::move(r));
+          }
+        }
+        py::dict out;
+        out["probes"] = results.size();
+        out["verified_pass"] = verified_pass;
+        out["expect_pass"] = expect_pass;
+        out["expect_total"] = expect_total;
+        py::list rows;
+        for (const auto& r : results) {
+          py::dict d;
+          d["id"] = r.id;
+          d["out"] = r.out;
+          d["parsed_ok"] = r.parsed_ok;
+          d["verified"] = r.verified;
+          if (r.has_expect) d["expect_match"] = r.expect_match;
+          rows.append(d);
+        }
+        out["results"] = rows;
+        return out;
+      },
+      py::arg("model_path"), py::arg("probes_path"),
+      py::arg("token_map_path"), py::arg("max_new") = 64,
+      py::arg("stop_id") = -1, py::arg("verify") = true,
+      "Native gate-battery runner (relay -4 ask 5): one call = load "
+      "FX-V1 crystal (table certification enforced — an uncertified "
+      "artifact throws), greedy-decode every probe (KV-cached exact "
+      "stepper, bit-exact with the full forward), detokenize via the "
+      "supplied token map (one piece per line, backslash-n/-t/-\\\\ "
+      "escapes), then oracle-verify decode vs the probe's cur (and "
+      "byte-compare vs expect when present). Probe rows: {id, cur, "
+      "tokens: 'space-separated ids', expect?}. Returns totals + "
+      "per-probe rows. GIL released for the whole battery.");
+
   // -------------------------------------------- versioned interface
   // Friendly-fire doctrine: llmopt version-asserts at arm time. Bump
   // INTERFACE_VERSION on ANY breaking change to a pinned name's
@@ -492,9 +727,11 @@ PYBIND11_MODULE(axiom_sym, m) {
   //       solve/emit_chain (pre-relay surface)
   //   2 = + verify_edge, dead_mask, dead_reason, solve_batch,
   //       predecessors (relays 2026-07-27-0 / -2)
-  m.attr("INTERFACE_VERSION") = 2;
+  //   3 = + frontier_eval, gate_battery (relay 2026-07-27-4)
+  m.attr("INTERFACE_VERSION") = 3;
   m.attr("INTERFACE") = py::make_tuple(
       "parse_sstr", "diff", "canonical", "equivalent",
       "equivalent_mod_const", "verify_edge", "dead_mask", "dead_reason",
-      "predecessors", "solve", "solve_batch", "emit_chain");
+      "predecessors", "solve", "solve_batch", "emit_chain",
+      "frontier_eval", "gate_battery");
 }

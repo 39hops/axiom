@@ -33,6 +33,22 @@ class exact_model {
   /** FNV-1a 64 over the last-position logits (little-endian int64). */
   std::uint64_t logits_hash(const std::vector<int>& tokens) const;
 
+  /** Greedy decode with a per-layer KV cache. Bit-exact with the
+      full forward by construction: the stepper IS the forward (a
+      position's integer ops never depend on later positions), so
+      caching changes cost, never values. Returns the generated ids
+      (prompt excluded); stops at stop_id (when >= 0), max_new, or
+      max_seq. */
+  std::vector<int> generate(const std::vector<int>& prompt, int max_new,
+                            int stop_id = -1) const;
+
+  /** Table certification (relay -4 ask 6): bounded-error vs a float
+      reference, monotonicity where argmax correctness depends on it,
+      seeded midpoint fuzz. Returns "" when certified, else the first
+      violation. The reference uses doubles — allowed here because
+      this is a CHECKER of the artifact, not part of the forward. */
+  std::string certify_tables() const;
+
   const config& cfg() const { return cfg_; }
 
  private:

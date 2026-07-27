@@ -182,6 +182,23 @@ for s, (solved, plies, nodes) in zip(batch_states, labels):
         agree = agree and len(d["history"]) == plies
 check("solve_batch agrees with sequential solve", agree)
 
+# ---- frontier_eval (relay -4 ask 4: the pincer inner loop)
+
+rows = ax.frontier_eval(ax.parse_sstr("Integral(x**2 + sin(x), x)"))
+check("frontier_eval returns ordered rows", len(rows) >= 2)
+check("frontier_eval verifies live rows",
+      all(r["verified"] is True for r in rows if not r["dead"]))
+scores = [r["score"] for r in rows if not r["dead"]]
+check("frontier_eval mass-descending", scores == sorted(scores,
+                                                        reverse=True))
+back = ax.frontier_eval(ax.parse_sstr("x**3/3 - cos(x)"),
+                        direction="backward")
+check("frontier_eval backward mirror", len(back) >= 1 and
+      all(r["verified"] is True for r in back if not r["dead"]))
+dead_rows = ax.frontier_eval(ax.parse_sstr("Integral(exp(x**2) + x, x)"))
+check("frontier_eval masks dead children",
+      any(r["dead"] for r in dead_rows))
+
 # ---- interface version (arm-time assertion contract)
 
 check("interface version present",

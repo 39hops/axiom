@@ -16,11 +16,18 @@
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    std::cerr << "usage: axiom-nn-exact <model.axnn> <prompts.txt>\n";
+    std::cerr << "usage: axiom-nn-exact <model.axnn> <prompts.txt>\n"
+                 "       axiom-nn-exact <model.axnn> --certify\n";
     return 2;
   }
   try {
     const auto m = ax::nn::exact_model::load(argv[1]);
+    if (std::string(argv[2]) == "--certify") {
+      // E2 import gate: certify the table artifacts before any use
+      const std::string r = m.certify_tables();
+      std::cout << (r.empty() ? "CERTIFIED" : "REJECTED: " + r) << "\n";
+      return r.empty() ? 0 : 1;
+    }
     std::ifstream in(argv[2]);
     if (!in.good()) {
       std::cerr << "cannot open " << argv[2] << "\n";

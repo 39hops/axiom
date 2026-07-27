@@ -104,6 +104,54 @@ TEST(NnExact, LoadRejectsMissingTables) {
   EXPECT_THROW(exact_model::from_parts(cfg, bad), std::runtime_error);
 }
 
+TEST(NnExact, GenerateMatchesFullForwardGreedy) {
+  // the KV-cached stepper must be bit-exact with re-running the full
+  // forward per step (same integer ops, cache changes cost only)
+  const auto cfg = tiny_cfg();
+  const auto m = exact_model::from_parts(cfg, tiny_parts(cfg, 33));
+  const std::vector<int> prompt{4, 1, 7};
+  const auto gen = m.generate(prompt, 8);
+  ASSERT_EQ(gen.size(), 8u);
+  std::vector<int> ctx = prompt;
+  for (const int g : gen) {
+    EXPECT_EQ(g, m.argmax(ctx));  // full re-forward path
+    ctx.push_back(g);
+  }
+}
+
+TEST(NnExact, GenerateStopsOnStopId) {
+  const auto cfg = tiny_cfg();
+  const auto m = exact_model::from_parts(cfg, tiny_parts(cfg, 33));
+  const std::vector<int> prompt{4, 1, 7};
+  const int first = m.generate(prompt, 1)[0];
+  const auto gen = m.generate(prompt, 8, first);
+  ASSERT_EQ(gen.size(), 1u);  // stop token kept, decode halted
+  EXPECT_EQ(gen[0], first);
+}
+
+TEST(NnExact, TableCertification) {
+  const auto cfg = tiny_cfg();
+  const auto m = exact_model::from_parts(cfg, tiny_parts(cfg, 41));
+  EXPECT_EQ(m.certify_tables(), "");
+  // corrupt one exp entry: certification must name the violation
+  auto bad = tiny_parts(cfg, 41);
+  bad.at("fx.exp.table").data[1000] += 300.0f;
+  const auto mb = exact_model::from_parts(cfg, bad);
+  EXPECT_NE(mb.certify_tables(), "");
+  // break monotonicity subtly (within entry tolerance windows this is
+  // exactly the argmax-order hazard the node exists for)
+  auto swap = tiny_parts(cfg, 41);
+  auto& et = swap.at("fx.exp.table").data;
+  // pick a region where the per-step gradient is ~1 LSB so the swap is
+  // inside entry tolerance but breaks ordering (t[500] sits in the
+  // flat underflow region where adjacent entries are EQUAL — a swap
+  // there is a no-op, measured)
+  ASSERT_GT(et[1301], et[1300]);
+  std::swap(et[1300], et[1301]);
+  const auto ms = exact_model::from_parts(cfg, swap);
+  EXPECT_NE(ms.certify_tables(), "");
+}
+
 TEST(NnExact, CausalityHoldsInIntegerPath) {
   const auto cfg = tiny_cfg();
   const auto m = exact_model::from_parts(cfg, tiny_parts(cfg, 21));
