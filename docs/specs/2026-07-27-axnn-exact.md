@@ -76,6 +76,12 @@ truncation in that shift is declared. Result = lerp(m) >> (s/2 - 1)
 - rope (if configured): (a·c - b·s) >> 16, (a·s + b·c) >> 16 per pair,
   half or interleaved indexing per config.
 - ffn: linear → activation table → linear.
+- ffn (swiglu, v1.1 / axnn_minor 1, relay 2026-07-28-4): g = linear
+  gate; u = linear up; g_i = act_table(g_i); h_i = sat((g_i·u_i) >> 16)
+  [Q.16·Q.16 → shift-16 = floor, the declared rounding]; out = linear
+  down over h. Fused qkv (attn_fused): one [3D,D] linear, rows split
+  q|k|v — Q.16 conversion is per-weight, so fused ≡ unfused bit-exactly
+  (tested).
 - readout: ln_f then head matmul; logits stay Q.32 int64, NO rescale.
 
 ## Greedy gate mode

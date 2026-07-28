@@ -81,6 +81,81 @@ std::map<std::string, tensor> tiny_parts(const config& c, unsigned seed) {
   return t;
 }
 
+TEST(NnExact, FusedQkvBitExact) {
+  // Q.16 conversion is per-weight, so stacking q/k/v into one tensor
+  // must not change a single bit of the integer forward.
+  const auto cfg = tiny_cfg();
+  const auto plain = tiny_parts(cfg, 55);
+  config fused_cfg = cfg;
+  fused_cfg.attn_fused = true;
+  fused_cfg.axnn_minor = 1;
+  auto fused = plain;
+  const auto D = static_cast<std::size_t>(cfg.d_model);
+  for (int i = 0; i < cfg.n_layers; ++i) {
+    const std::string L = "layers." + std::to_string(i) + ".";
+    tensor qkv, qkvb;
+    qkv.dims = {3 * D, D};
+    qkvb.dims = {3 * D};
+    for (const char* w : {"q", "k", "v"}) {
+      const auto& wt = fused.at(L + "attn." + w + ".weight");
+      qkv.data.insert(qkv.data.end(), wt.data.begin(), wt.data.end());
+      const auto& bt = fused.at(L + "attn." + w + ".bias");
+      qkvb.data.insert(qkvb.data.end(), bt.data.begin(), bt.data.end());
+      fused.erase(L + "attn." + std::string(w) + ".weight");
+      fused.erase(L + "attn." + std::string(w) + ".bias");
+    }
+    fused[L + "attn.qkv.weight"] = std::move(qkv);
+    fused[L + "attn.qkv.bias"] = std::move(qkvb);
+  }
+  const auto m1 = exact_model::from_parts(cfg, plain);
+  const auto m2 = exact_model::from_parts(fused_cfg, fused);
+  const std::vector<int> toks{2, 5, 1, 8, 3};
+  EXPECT_EQ(m1.logits_q32(toks), m2.logits_q32(toks));
+  EXPECT_EQ(m1.logits_hash(toks), m2.logits_hash(toks));
+}
+
+TEST(NnExact, SwigluDeterministicInstanceStable) {
+  config cfg = tiny_cfg();
+  cfg.ffn = "swiglu";
+  cfg.act = "silu";
+  cfg.axnn_minor = 1;
+  auto parts = tiny_parts(cfg, 65);
+  const auto D = static_cast<std::size_t>(cfg.d_model);
+  const auto F = static_cast<std::size_t>(cfg.d_ff);
+  std::mt19937 rng(66);
+  std::normal_distribution<float> nd(0.0f, 0.05f);
+  const auto mk = [&](std::size_t r, std::size_t co) {
+    tensor x;
+    x.dims = co ? std::vector<std::size_t>{r, co}
+                : std::vector<std::size_t>{r};
+    x.data.resize(r * (co ? co : 1));
+    for (float& v : x.data) v = nd(rng);
+    return x;
+  };
+  for (int i = 0; i < cfg.n_layers; ++i) {
+    const std::string L = "layers." + std::to_string(i) + ".";
+    parts.erase(L + "ffn.fc1.weight");
+    parts.erase(L + "ffn.fc1.bias");
+    parts.erase(L + "ffn.fc2.weight");
+    parts.erase(L + "ffn.fc2.bias");
+    parts[L + "ffn.gate.weight"] = mk(F, D);
+    parts[L + "ffn.gate.bias"] = mk(F, 0);
+    parts[L + "ffn.up.weight"] = mk(F, D);
+    parts[L + "ffn.up.bias"] = mk(F, 0);
+    parts[L + "ffn.down.weight"] = mk(D, F);
+    parts[L + "ffn.down.bias"] = mk(D, 0);
+  }
+  parts["fx.act.table"] = table_of(
+      2049, [](double x) { return x / (1.0 + std::exp(-x)); }, -32.0,
+      1.0 / 32.0);
+  const auto m1 = exact_model::from_parts(cfg, parts);
+  const auto m2 = exact_model::from_parts(cfg, parts);
+  const std::vector<int> toks{4, 9, 0, 2};
+  EXPECT_EQ(m1.logits_q32(toks), m2.logits_q32(toks));
+  const auto gen = m1.generate({4, 9}, 4);
+  EXPECT_EQ(gen.size(), 4u);  // stepper runs the swiglu path too
+}
+
 TEST(NnExact, DeterministicAndInstanceStable) {
   const auto cfg = tiny_cfg();
   const auto m1 = exact_model::from_parts(cfg, tiny_parts(cfg, 7));

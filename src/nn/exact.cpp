@@ -307,12 +307,25 @@ struct fx_stepper {
     for (int layer = 0; layer < cfg.n_layers; ++layer) {
       const std::string L = "layers." + std::to_string(layer) + ".";
       const auto h1 = norm_row(x, L + "ln1");
-      auto q = linear_row(h1, D, D, W(L + "attn.q.weight"),
-                          bias(L + "attn.q.bias"));
-      auto k = linear_row(h1, D, D, W(L + "attn.k.weight"),
-                          bias(L + "attn.k.bias"));
-      const auto v = linear_row(h1, D, D, W(L + "attn.v.weight"),
-                                bias(L + "attn.v.bias"));
+      std::vector<int64_t> q, k, v;
+      if (cfg.attn_fused) {
+        // one [3D,D] GEMM, rows stacked q|k|v (v1.1); Q.16 conversion
+        // is per-weight, so fused == unfused bit-exactly
+        const auto qkv = linear_row(h1, D, 3 * D,
+                                    W(L + "attn.qkv.weight"),
+                                    bias(L + "attn.qkv.bias"));
+        q.assign(qkv.begin(), qkv.begin() + static_cast<long long>(D));
+        k.assign(qkv.begin() + static_cast<long long>(D),
+                 qkv.begin() + static_cast<long long>(2 * D));
+        v.assign(qkv.begin() + static_cast<long long>(2 * D), qkv.end());
+      } else {
+        q = linear_row(h1, D, D, W(L + "attn.q.weight"),
+                       bias(L + "attn.q.bias"));
+        k = linear_row(h1, D, D, W(L + "attn.k.weight"),
+                       bias(L + "attn.k.bias"));
+        v = linear_row(h1, D, D, W(L + "attn.v.weight"),
+                       bias(L + "attn.v.bias"));
+      }
       if (cfg.pos == "rope") {
         rope_row(q);
         rope_row(k);
@@ -353,11 +366,26 @@ struct fx_stepper {
       for (std::size_t d = 0; d < D; ++d)
         x[d] = sat(x[d] + proj[d], fxv1::kActSat);
       const auto h2 = norm_row(x, L + "ln2");
-      auto f1 = linear_row(h2, D, F, W(L + "ffn.fc1.weight"),
-                           bias(L + "ffn.fc1.bias"));
-      activate(f1);
-      const auto f2 = linear_row(f1, F, D, W(L + "ffn.fc2.weight"),
-                                 bias(L + "ffn.fc2.bias"));
+      std::vector<int64_t> f2;
+      if (cfg.ffn == "swiglu") {
+        // down(act(gate) * up): Q.16 * Q.16 -> shift-16 (floor, the
+        // declared rounding), saturate to the activation band
+        auto g = linear_row(h2, D, F, W(L + "ffn.gate.weight"),
+                            bias(L + "ffn.gate.bias"));
+        const auto u = linear_row(h2, D, F, W(L + "ffn.up.weight"),
+                                  bias(L + "ffn.up.bias"));
+        activate(g);
+        for (std::size_t i = 0; i < F; ++i)
+          g[i] = sat((g[i] * u[i]) >> 16, fxv1::kActSat);
+        f2 = linear_row(g, F, D, W(L + "ffn.down.weight"),
+                        bias(L + "ffn.down.bias"));
+      } else {
+        auto f1 = linear_row(h2, D, F, W(L + "ffn.fc1.weight"),
+                             bias(L + "ffn.fc1.bias"));
+        activate(f1);
+        f2 = linear_row(f1, F, D, W(L + "ffn.fc2.weight"),
+                        bias(L + "ffn.fc2.bias"));
+      }
       for (std::size_t d = 0; d < D; ++d)
         x[d] = sat(x[d] + f2[d], fxv1::kActSat);
     }

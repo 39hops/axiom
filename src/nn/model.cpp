@@ -102,6 +102,17 @@ void model::validate() const {
   if (cfg_.rope_style != "half" && cfg_.rope_style != "interleaved")
     throw std::runtime_error("axnn: unknown rope_style " +
                              cfg_.rope_style);
+  if (cfg_.ffn != "fc" && cfg_.ffn != "swiglu")
+    throw std::runtime_error("axnn: unknown ffn " + cfg_.ffn);
+  if (cfg_.head != "auto" && cfg_.head != "tied" &&
+      cfg_.head != "separate")
+    throw std::runtime_error("axnn: unknown head " + cfg_.head);
+  if (cfg_.axnn_minor < 0 || cfg_.axnn_minor > 1)
+    throw std::runtime_error("axnn: unsupported axnn_minor");
+  // v1.1 features require the minor to be declared (friendly-fire:
+  // an old writer cannot silently emit tensors a v1 reader drops)
+  if (cfg_.axnn_minor < 1 && (cfg_.ffn != "fc" || cfg_.attn_fused))
+    throw std::runtime_error("axnn: v1.1 feature without axnn_minor 1");
   need("tok_emb.weight", V, D);
   if (cfg_.pos == "learned")
     need("pos_emb.weight", static_cast<std::size_t>(cfg_.max_seq), D);
@@ -109,20 +120,42 @@ void model::validate() const {
     const std::string L = "layers." + std::to_string(i) + ".";
     need(L + "ln1.weight", D, 0);
     optional(L + "ln1.bias", D);
-    for (const char* w : {"q", "k", "v", "o"}) {
-      need(L + "attn." + w + ".weight", D, D);
-      optional(L + "attn." + w + ".bias", D);
+    if (cfg_.attn_fused) {
+      need(L + "attn.qkv.weight", 3 * D, D);
+      optional(L + "attn.qkv.bias", 3 * D);
+      need(L + "attn.o.weight", D, D);
+      optional(L + "attn.o.bias", D);
+    } else {
+      for (const char* w : {"q", "k", "v", "o"}) {
+        need(L + "attn." + w + ".weight", D, D);
+        optional(L + "attn." + w + ".bias", D);
+      }
     }
     need(L + "ln2.weight", D, 0);
     optional(L + "ln2.bias", D);
-    need(L + "ffn.fc1.weight", F, D);
-    optional(L + "ffn.fc1.bias", F);
-    need(L + "ffn.fc2.weight", D, F);
-    optional(L + "ffn.fc2.bias", D);
+    if (cfg_.ffn == "swiglu") {
+      need(L + "ffn.gate.weight", F, D);
+      optional(L + "ffn.gate.bias", F);
+      need(L + "ffn.up.weight", F, D);
+      optional(L + "ffn.up.bias", F);
+      need(L + "ffn.down.weight", D, F);
+      optional(L + "ffn.down.bias", D);
+    } else {
+      need(L + "ffn.fc1.weight", F, D);
+      optional(L + "ffn.fc1.bias", F);
+      need(L + "ffn.fc2.weight", D, F);
+      optional(L + "ffn.fc2.bias", D);
+    }
   }
   need("ln_f.weight", D, 0);
   optional("ln_f.bias", D);
   if (t_.count("head.weight")) need("head.weight", V, D);
+  if (cfg_.head == "tied" && t_.count("head.weight"))
+    throw std::runtime_error("axnn: head declared tied but head.weight "
+                             "present");
+  if (cfg_.head == "separate" && !t_.count("head.weight"))
+    throw std::runtime_error("axnn: head declared separate but "
+                             "head.weight missing");
 }
 
 std::pair<config, std::map<std::string, tensor>> load_container(
@@ -149,6 +182,12 @@ std::pair<config, std::map<std::string, tensor>> load_container(
   cfg.rope_style = cfg_str(cfg_json, "rope_style", "half");
   cfg.eps = cfg_num(cfg_json, "eps", 1e-5);
   cfg.rope_theta = cfg_num(cfg_json, "rope_theta", 10000.0);
+  cfg.ffn = cfg_str(cfg_json, "ffn", "fc");
+  cfg.attn_fused =
+      static_cast<int>(cfg_num(cfg_json, "attn_fused", 0.0)) != 0;
+  cfg.head = cfg_str(cfg_json, "head", "auto");
+  cfg.axnn_minor =
+      static_cast<int>(cfg_num(cfg_json, "axnn_minor", 0.0));
 
   std::map<std::string, tensor> tensors;
   while (in.peek() != std::ifstream::traits_type::eof()) {
@@ -290,12 +329,28 @@ std::vector<float> model::logits(const std::vector<int>& tokens) const {
     const std::string L = "layers." + std::to_string(layer) + ".";
     // ---- attention block (pre-LN)
     const auto h1 = normed(x, L + "ln1");
-    auto q = linear(h1, D, D, W(L + "attn.q.weight"),
-                    bias(L + "attn.q.bias"));
-    auto k = linear(h1, D, D, W(L + "attn.k.weight"),
-                    bias(L + "attn.k.bias"));
-    const auto v = linear(h1, D, D, W(L + "attn.v.weight"),
-                          bias(L + "attn.v.bias"));
+    std::vector<double> q, k, v;
+    if (cfg_.attn_fused) {
+      // one [3D,D] GEMM; rows stacked q|k|v (v1.1 declared layout)
+      const auto qkv = linear(h1, D, 3 * D, W(L + "attn.qkv.weight"),
+                              bias(L + "attn.qkv.bias"));
+      q.resize(T * D);
+      k.resize(T * D);
+      v.resize(T * D);
+      for (std::size_t t = 0; t < T; ++t)
+        for (std::size_t d = 0; d < D; ++d) {
+          q[t * D + d] = qkv[t * 3 * D + d];
+          k[t * D + d] = qkv[t * 3 * D + D + d];
+          v[t * D + d] = qkv[t * 3 * D + 2 * D + d];
+        }
+    } else {
+      q = linear(h1, D, D, W(L + "attn.q.weight"),
+                 bias(L + "attn.q.bias"));
+      k = linear(h1, D, D, W(L + "attn.k.weight"),
+                 bias(L + "attn.k.bias"));
+      v = linear(h1, D, D, W(L + "attn.v.weight"),
+                 bias(L + "attn.v.bias"));
+    }
     if (cfg_.pos == "rope") {
       rope(q);
       rope(k);
@@ -329,11 +384,25 @@ std::vector<float> model::logits(const std::vector<int>& tokens) const {
     for (std::size_t i = 0; i < T * D; ++i) x[i] += proj[i];
     // ---- ffn block (pre-LN)
     const auto h2 = normed(x, L + "ln2");
-    auto f1 = linear(h2, D, F, W(L + "ffn.fc1.weight"),
-                     bias(L + "ffn.fc1.bias"));
-    for (double& v2 : f1) v2 = act_of(v2, act);
-    const auto f2 = linear(f1, F, D, W(L + "ffn.fc2.weight"),
-                           bias(L + "ffn.fc2.bias"));
+    std::vector<double> f2;
+    if (cfg_.ffn == "swiglu") {
+      // down(act(gate(x)) * up(x)); act is the declared one (silu for
+      // the crystal family) applied to the gate branch only
+      auto g = linear(h2, D, F, W(L + "ffn.gate.weight"),
+                      bias(L + "ffn.gate.bias"));
+      const auto u = linear(h2, D, F, W(L + "ffn.up.weight"),
+                            bias(L + "ffn.up.bias"));
+      for (std::size_t i = 0; i < T * F; ++i)
+        g[i] = act_of(g[i], act) * u[i];
+      f2 = linear(g, F, D, W(L + "ffn.down.weight"),
+                  bias(L + "ffn.down.bias"));
+    } else {
+      auto f1 = linear(h2, D, F, W(L + "ffn.fc1.weight"),
+                       bias(L + "ffn.fc1.bias"));
+      for (double& v2 : f1) v2 = act_of(v2, act);
+      f2 = linear(f1, F, D, W(L + "ffn.fc2.weight"),
+                  bias(L + "ffn.fc2.bias"));
+    }
     for (std::size_t i = 0; i < T * D; ++i) x[i] += f2[i];
   }
 

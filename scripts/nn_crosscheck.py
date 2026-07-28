@@ -62,8 +62,14 @@ class Ref(torch.nn.Module):
             blk = torch.nn.ModuleDict({
                 "q": torch.nn.Linear(D, D), "k": torch.nn.Linear(D, D),
                 "v": torch.nn.Linear(D, D), "o": torch.nn.Linear(D, D),
-                "fc1": torch.nn.Linear(D, F), "fc2": torch.nn.Linear(F, D),
             })
+            if cfg.get("ffn", "fc") == "swiglu":
+                blk["gate"] = torch.nn.Linear(D, F)
+                blk["up"] = torch.nn.Linear(D, F)
+                blk["down"] = torch.nn.Linear(F, D)
+            else:
+                blk["fc1"] = torch.nn.Linear(D, F)
+                blk["fc2"] = torch.nn.Linear(F, D)
             blk["ln1"] = self._norm(D)
             blk["ln2"] = self._norm(D)
             self.layers.append(blk)
@@ -116,7 +122,11 @@ class Ref(torch.nn.Module):
             out = torch.einsum("htu,uhd->thd", att, v).reshape(T, D)
             x = x + blk["o"](out)
             h = blk["ln2"](x)
-            x = x + blk["fc2"](self._act(blk["fc1"](h)))
+            if cfg.get("ffn", "fc") == "swiglu":
+                x = x + blk["down"](self._act(blk["gate"](h)) *
+                                    blk["up"](h))
+            else:
+                x = x + blk["fc2"](self._act(blk["fc1"](h)))
         x = self.ln_f(x)
         w = self.tok.weight if cfg["tied_head"] else self.head.weight
         return x @ w.T
@@ -128,13 +138,27 @@ def export_tensors(ref, cfg):
         t["pos_emb.weight"] = ref.pos.weight
     for i, blk in enumerate(ref.layers):
         L = f"layers.{i}."
-        for nm in ("q", "k", "v", "o"):
-            t[L + f"attn.{nm}.weight"] = blk[nm].weight
-            t[L + f"attn.{nm}.bias"] = blk[nm].bias
-        t[L + "ffn.fc1.weight"] = blk["fc1"].weight
-        t[L + "ffn.fc1.bias"] = blk["fc1"].bias
-        t[L + "ffn.fc2.weight"] = blk["fc2"].weight
-        t[L + "ffn.fc2.bias"] = blk["fc2"].bias
+        if cfg.get("attn_fused", 0):
+            # v1.1 fused layout: rows stacked q|k|v
+            t[L + "attn.qkv.weight"] = torch.cat(
+                [blk[n].weight for n in ("q", "k", "v")], dim=0)
+            t[L + "attn.qkv.bias"] = torch.cat(
+                [blk[n].bias for n in ("q", "k", "v")], dim=0)
+            t[L + "attn.o.weight"] = blk["o"].weight
+            t[L + "attn.o.bias"] = blk["o"].bias
+        else:
+            for nm in ("q", "k", "v", "o"):
+                t[L + f"attn.{nm}.weight"] = blk[nm].weight
+                t[L + f"attn.{nm}.bias"] = blk[nm].bias
+        if cfg.get("ffn", "fc") == "swiglu":
+            for nm in ("gate", "up", "down"):
+                t[L + f"ffn.{nm}.weight"] = blk[nm].weight
+                t[L + f"ffn.{nm}.bias"] = blk[nm].bias
+        else:
+            t[L + "ffn.fc1.weight"] = blk["fc1"].weight
+            t[L + "ffn.fc1.bias"] = blk["fc1"].bias
+            t[L + "ffn.fc2.weight"] = blk["fc2"].weight
+            t[L + "ffn.fc2.bias"] = blk["fc2"].bias
         for ln, tag in (("ln1", L + "ln1"), ("ln2", L + "ln2")):
             t[tag + ".weight"] = blk[ln].weight
             if cfg["norm"] == "layernorm":
@@ -188,8 +212,15 @@ def main():
              tied_head=True)
     b = dict(crystal, norm="rmsnorm", act="silu", pos="rope",
              tied_head=False)
+    # c = the S2 winner's exact conventions (v1.1, relay 2026-07-28-4):
+    # rmsnorm eps 1e-6 / silu / rope-half / tied head / fused qkv /
+    # swiglu ffn — d_ff at the swiglu crystal shape
+    c = dict(crystal, norm="rmsnorm", act="silu", pos="rope",
+             tied_head=True, eps=1e-6, ffn="swiglu", attn_fused=1,
+             head="tied", axnn_minor=1)
     ok = run_variant("a_ln_gelu_learned_tied", a, 20260727)
     ok &= run_variant("b_rms_silu_rope_head", b, 31415926)
+    ok &= run_variant("c_s2_swiglu_fused_tied", c, 27182818)
     sys.exit(0 if ok else 1)
 
 

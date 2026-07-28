@@ -27,7 +27,18 @@
       layers.{i}.ln2.weight/.bias [D]
       layers.{i}.ffn.fc1.weight [F,D] /.bias [F]
       layers.{i}.ffn.fc2.weight [D,F] /.bias [D]
-      ln_f.weight/.bias [D]     head.weight [V,D] (optional) */
+      ln_f.weight/.bias [D]     head.weight [V,D] (optional)
+
+    v1.1 (axnn_minor 1, relay 2026-07-28-4 — byte-compatible header/
+    tensor encoding; the delta is cfg keys + alternate tensor names):
+      cfg ffn = "swiglu": three-tensor FFN, down(act(gate(x)) * up(x))
+        layers.{i}.ffn.gate.weight [F,D] /.bias [F]
+        layers.{i}.ffn.up.weight   [F,D] /.bias [F]
+        layers.{i}.ffn.down.weight [D,F] /.bias [D]
+      cfg attn_fused = 1: q,k,v stacked row-wise in one tensor
+        layers.{i}.attn.qkv.weight [3D,D] /.bias [3D]
+      cfg head = "tied"|"separate": declared (vs inferred-by-absence);
+      validated against tensor presence. */
 #include <cstddef>
 #include <map>
 #include <string>
@@ -45,6 +56,11 @@ struct config {
   std::string rope_style = "half";  // half | interleaved
   double eps = 1e-5;
   double rope_theta = 10000.0;
+  // v1.1 (axnn_minor 1) declarations; v1 defaults are the fallbacks
+  std::string ffn = "fc";     // fc | swiglu
+  bool attn_fused = false;    // one qkv tensor [3D,D] vs separate q/k/v
+  std::string head = "auto";  // auto (infer by presence) | tied | separate
+  int axnn_minor = 0;
 };
 
 struct tensor {

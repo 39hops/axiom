@@ -65,6 +65,109 @@ std::map<std::string, tensor> tiny_tensors(const config& c, unsigned seed) {
   return t;
 }
 
+// v1.1 helpers: stack q/k/v into one qkv tensor; swap the fc FFN for
+// fresh gate/up/down tensors (swiglu is a different function — it
+// cannot be derived from fc weights, only validated structurally here;
+// the numeric bar vs torch lives in scripts/nn_crosscheck.py).
+std::map<std::string, tensor> fuse_qkv(std::map<std::string, tensor> t,
+                                       const config& c) {
+  const auto D = static_cast<std::size_t>(c.d_model);
+  for (int i = 0; i < c.n_layers; ++i) {
+    const std::string L = "layers." + std::to_string(i) + ".";
+    tensor qkv, qkvb;
+    qkv.dims = {3 * D, D};
+    qkvb.dims = {3 * D};
+    for (const char* w : {"q", "k", "v"}) {
+      const auto& wt = t.at(L + "attn." + w + ".weight");
+      qkv.data.insert(qkv.data.end(), wt.data.begin(), wt.data.end());
+      const auto& bt = t.at(L + "attn." + w + ".bias");
+      qkvb.data.insert(qkvb.data.end(), bt.data.begin(), bt.data.end());
+      t.erase(L + "attn." + std::string(w) + ".weight");
+      t.erase(L + "attn." + std::string(w) + ".bias");
+    }
+    t[L + "attn.qkv.weight"] = std::move(qkv);
+    t[L + "attn.qkv.bias"] = std::move(qkvb);
+  }
+  return t;
+}
+
+std::map<std::string, tensor> swiglu_tensors(const config& c,
+                                             unsigned seed) {
+  auto t = tiny_tensors(c, seed);
+  std::mt19937 rng(seed + 1000);
+  std::normal_distribution<float> nd(0.0f, 0.05f);
+  const auto mk = [&](std::size_t r, std::size_t co) {
+    tensor x;
+    x.dims = co ? std::vector<std::size_t>{r, co}
+                : std::vector<std::size_t>{r};
+    x.data.resize(r * (co ? co : 1));
+    for (float& v : x.data) v = nd(rng);
+    return x;
+  };
+  const auto D = static_cast<std::size_t>(c.d_model);
+  const auto F = static_cast<std::size_t>(c.d_ff);
+  for (int i = 0; i < c.n_layers; ++i) {
+    const std::string L = "layers." + std::to_string(i) + ".";
+    t.erase(L + "ffn.fc1.weight");
+    t.erase(L + "ffn.fc1.bias");
+    t.erase(L + "ffn.fc2.weight");
+    t.erase(L + "ffn.fc2.bias");
+    t[L + "ffn.gate.weight"] = mk(F, D);
+    t[L + "ffn.gate.bias"] = mk(F, 0);
+    t[L + "ffn.up.weight"] = mk(F, D);
+    t[L + "ffn.up.bias"] = mk(F, 0);
+    t[L + "ffn.down.weight"] = mk(D, F);
+    t[L + "ffn.down.bias"] = mk(D, 0);
+  }
+  return t;
+}
+
+TEST(Nn, FusedQkvMatchesUnfused) {
+  const auto cfg = tiny_cfg();
+  const auto plain = tiny_tensors(cfg, 51);
+  config fused_cfg = cfg;
+  fused_cfg.attn_fused = true;
+  fused_cfg.axnn_minor = 1;
+  const auto m1 = model::from_parts(cfg, plain);
+  const auto m2 =
+      model::from_parts(fused_cfg, fuse_qkv(plain, cfg));
+  const std::vector<int> toks{1, 4, 2, 9, 0, 6};
+  EXPECT_EQ(m1.logits(toks), m2.logits(toks));
+}
+
+TEST(Nn, SwigluForwardDeterministicAndValidated) {
+  config cfg = tiny_cfg();
+  cfg.ffn = "swiglu";
+  cfg.act = "silu";
+  cfg.axnn_minor = 1;
+  const auto m1 = model::from_parts(cfg, swiglu_tensors(cfg, 61));
+  const auto m2 = model::from_parts(cfg, swiglu_tensors(cfg, 61));
+  const std::vector<int> toks{3, 7, 1, 10};
+  EXPECT_EQ(m1.logits(toks), m2.logits(toks));
+  auto missing = swiglu_tensors(cfg, 61);
+  missing.erase("layers.0.ffn.up.weight");
+  EXPECT_THROW(model::from_parts(cfg, missing), std::runtime_error);
+  // v1.1 features are gated on the declared minor (friendly-fire)
+  config undeclared = cfg;
+  undeclared.axnn_minor = 0;
+  EXPECT_THROW(model::from_parts(undeclared, swiglu_tensors(cfg, 61)),
+               std::runtime_error);
+}
+
+TEST(Nn, HeadDeclarationValidated) {
+  config cfg = tiny_cfg();
+  cfg.head = "tied";
+  auto with_head = tiny_tensors(cfg, 71);
+  with_head["head.weight"] = with_head.at("tok_emb.weight");
+  EXPECT_THROW(model::from_parts(cfg, with_head), std::runtime_error);
+  cfg.head = "separate";
+  EXPECT_THROW(model::from_parts(cfg, tiny_tensors(cfg, 71)),
+               std::runtime_error);
+  cfg.head = "tied";
+  const auto m = model::from_parts(cfg, tiny_tensors(cfg, 71));
+  EXPECT_EQ(m.cfg().head, "tied");
+}
+
 TEST(Nn, DeterministicForward) {
   const auto m = model::from_parts(tiny_cfg(), tiny_tensors(tiny_cfg(), 7));
   const std::vector<int> toks{1, 4, 9, 2, 2, 10};
