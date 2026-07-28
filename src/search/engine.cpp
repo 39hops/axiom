@@ -44,6 +44,21 @@ double markov_prior::median_unigram() const {
   return static_cast<double>(v[v.size() / 2]);
 }
 
+double markov_prior::score(const std::string& rule_name,
+                           const std::string& prev, double med) const {
+  const auto u = unigram.find(rule_name);
+  if (u == unigram.end()) return 0.5 * med;
+  double sc = 0.01 * static_cast<double>(u->second);
+  if (!prev.empty()) {
+    const auto it = bigram.find(prev);
+    if (it != bigram.end()) {
+      const auto b = it->second.find(rule_name);
+      if (b != it->second.end()) sc += static_cast<double>(b->second);
+    }
+  }
+  return sc;
+}
+
 std::function<std::vector<std::pair<std::string, state>>(
     const state&, std::vector<std::pair<std::string, state>>)>
 markov_prior::proposer() const {
@@ -56,24 +71,10 @@ markov_prior::proposer() const {
   return [self, med](const state& s,
                      std::vector<std::pair<std::string, state>> kids) {
     const std::string prev = s.history.empty() ? "" : s.history.back();
-    const auto* table =
-        prev.empty() ? nullptr : [&]() -> const std::map<std::string, long long>* {
-          const auto it = self.bigram.find(prev);
-          return it == self.bigram.end() ? nullptr : &it->second;
-        }();
-    const auto score = [&](const std::string& name) -> double {
-      const auto u = self.unigram.find(name);
-      if (u == self.unigram.end()) return 0.5 * med;
-      double sc = 0.01 * static_cast<double>(u->second);
-      if (table != nullptr) {
-        const auto b = table->find(name);
-        if (b != table->end()) sc += static_cast<double>(b->second);
-      }
-      return sc;
-    };
     std::stable_sort(kids.begin(), kids.end(),
                      [&](const auto& a, const auto& b) {
-                       return score(a.first) > score(b.first);
+                       return self.score(a.first, prev, med) >
+                              self.score(b.first, prev, med);
                      });
     return kids;
   };

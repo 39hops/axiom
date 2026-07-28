@@ -229,6 +229,11 @@ struct markov_prior {
 
   static markov_prior load_tsv(const std::string& path);
   double median_unigram() const;
+  /** The proposer's scoring convention as a standalone value: seen ->
+      0.01*unigram[rule] (+ bigram[prev][rule] when prev seen), unseen
+      rule -> 0.5*median unigram (the measured trial-mass rule). */
+  double score(const std::string& rule_name, const std::string& prev,
+               double med) const;
   /** Children reranker: bigram[prev][rule] + 0.01*unigram[rule];
       unseen rules get 0.5*median trial mass (the measured rule). */
   std::function<std::vector<std::pair<std::string, state>>(

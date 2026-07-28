@@ -202,6 +202,56 @@ dead_rows = ax.frontier_eval(ax.parse_sstr("Integral(exp(x**2) + x, x)"))
 check("frontier_eval masks dead children",
       any(r["dead"] for r in dead_rows))
 
+# ---- successors / successors_dist (relay -9: forward enumeration)
+
+fwd = ax.successors(ax.parse_sstr("Integral(x**2 + sin(x), x)"))
+check("successors returns rows", len(fwd["rows"]) >= 2)
+check("successors not expired without wall", fwd["expired"] is False)
+check("successors emissions pass verify_edge",
+      all(ax.verify_edge(ax.parse_sstr("Integral(x**2 + sin(x), x)"), s)
+          for _, s in fwd["rows"]))
+names = [r for r, _ in fwd["rows"]]
+check("successors labels are bare rule names",
+      all(isinstance(r, str) and r for r in names))
+
+dist = ax.successors_dist(ax.parse_sstr("Integral(x**2 + sin(x), x)"),
+                          "data/llmopt/markov_prior.tsv")
+check("successors_dist same edge set",
+      [(r, str(s)) for r, s, _ in dist["rows"]]
+      == [(r, str(s)) for r, s in fwd["rows"]])
+ws = [w for _, _, w in dist["rows"]]
+check("successors_dist weights normalized",
+      abs(sum(ws) - 1.0) < 1e-12 and all(w > 0 for w in ws))
+
+# exact convention check: recompute from the TSV in python
+uni, big = {}, {}
+with open("data/llmopt/markov_prior.tsv") as f:
+    for line in f:
+        parts = line.split()
+        if parts and parts[0] == "U":
+            uni[parts[1]] = int(parts[2])
+        elif parts and parts[0] == "B":
+            big.setdefault(parts[1], {})[parts[2]] = int(parts[3])
+med = float(sorted(uni.values())[len(uni) // 2])
+
+
+def prior_score(rule, prev):
+    if rule not in uni:
+        return 0.5 * med
+    return 0.01 * uni[rule] + big.get(prev, {}).get(rule, 0)
+
+
+for prev in ("", names[0]):
+    got = ax.successors_dist(ax.parse_sstr("Integral(x**2 + sin(x), x)"),
+                             "data/llmopt/markov_prior.tsv",
+                             prev_rule=prev)
+    raw = [prior_score(r, prev) for r, _, _ in got["rows"]]
+    tot = sum(raw)
+    want = [s / tot for s in raw]
+    check(f"successors_dist matches convention (prev={prev!r})",
+          all(abs(a - b) < 1e-12
+              for a, b in zip([w for _, _, w in got["rows"]], want)))
+
 # ---- interface version (arm-time assertion contract)
 
 check("interface version present",

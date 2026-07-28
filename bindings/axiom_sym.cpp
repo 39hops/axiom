@@ -493,6 +493,96 @@ PYBIND11_MODULE(axiom_sym, m) {
       "verify_p=1 — every returned pair is an oracle-verified legal "
       "edge (gate: 98% true-predecessor containment, 12.3ms median).");
 
+  // --------------------------- relay -9 ask 2: forward enumeration
+  {
+    // shared core: verified successor set + honest censoring flag
+    auto enumerate = [](const sym::expr& state_e, bool use_macros,
+                       long long deadline_ms) {
+      namespace se = ax::search;
+      se::successor_options sopt;
+      sopt.use_macros = use_macros;
+      sopt.verify_p = 1.0;  // every emission pays verify_edge in-engine
+      std::optional<std::chrono::steady_clock::time_point> deadline;
+      if (deadline_ms > 0) {
+        deadline = std::chrono::steady_clock::now() +
+                   std::chrono::milliseconds(deadline_ms);
+        sopt.deadline = deadline;
+      }
+      auto kids =
+          se::successors(se::state{state_e}, se::default_rules(), sopt);
+      // Conservative censoring: the wall having passed by the end of
+      // enumeration flags expired even if the set completed at the
+      // wire — censored != fact, never a silent partial (E4 doctrine).
+      const bool expired =
+          deadline && std::chrono::steady_clock::now() > *deadline;
+      return std::make_pair(std::move(kids), expired);
+    };
+
+    m.def(
+        "successors",
+        [enumerate](const sym::expr& state_e, bool use_macros,
+                    long long deadline_ms) {
+          std::vector<std::pair<std::string, sym::expr>> rows;
+          bool expired = false;
+          {
+            py::gil_scoped_release run_without_gil;
+            auto [kids, exp] = enumerate(state_e, use_macros, deadline_ms);
+            expired = exp;
+            rows.reserve(kids.size());
+            for (auto& [r, ch] : kids) rows.emplace_back(r, ch.e);
+          }
+          py::dict out;
+          out["rows"] = py::cast(rows);
+          out["expired"] = expired;
+          return out;
+        },
+        py::arg("state"), py::arg("use_macros") = true,
+        py::arg("deadline_ms") = 0,
+        "Forward rule-fire enumeration (relay -9): {rows: [(rule, "
+        "successor)], expired}. Every row is verify_edge-certified "
+        "(verify_p=1 in-engine) — no unverified child crosses the "
+        "bridge. expired=True means the deadline_ms wall may have "
+        "censored the set; censored != fact, never a silent partial.");
+
+    m.def(
+        "successors_dist",
+        [enumerate](const sym::expr& state_e, const std::string& prior_tsv,
+                    const std::string& prev_rule, bool use_macros,
+                    long long deadline_ms) {
+          namespace se = ax::search;
+          std::vector<std::tuple<std::string, sym::expr, double>> rows;
+          bool expired = false;
+          {
+            py::gil_scoped_release run_without_gil;
+            const auto prior = se::markov_prior::load_tsv(prior_tsv);
+            const double med = prior.median_unigram();
+            auto [kids, exp] = enumerate(state_e, use_macros, deadline_ms);
+            expired = exp;
+            double total = 0.0;
+            for (const auto& [r, ch] : kids)
+              total += prior.score(r, prev_rule, med);
+            rows.reserve(kids.size());
+            for (auto& [r, ch] : kids) {
+              const double s = prior.score(r, prev_rule, med);
+              rows.emplace_back(r, ch.e, total > 0.0 ? s / total : 0.0);
+            }
+          }
+          py::dict out;
+          out["rows"] = py::cast(rows);
+          out["expired"] = expired;
+          return out;
+        },
+        py::arg("state"), py::arg("prior_tsv"),
+        py::arg("prev_rule") = std::string(),
+        py::arg("use_macros") = true, py::arg("deadline_ms") = 0,
+        "Prior-weighted successor distribution (relay -9 sub-ask): "
+        "{rows: [(rule, successor, w)], expired}, w normalized over "
+        "the emitted set from the pinned markov_prior.tsv under the "
+        "house proposer convention (0.01*unigram + bigram[prev][rule]; "
+        "unseen rule = 0.5*median unigram). Same verify_edge "
+        "certification and censoring semantics as successors().");
+  }
+
   // ------------------------------------------ relay -4: tools tranche
   m.def(
       "frontier_eval",
@@ -735,10 +825,12 @@ PYBIND11_MODULE(axiom_sym, m) {
   //   3 = + frontier_eval, gate_battery (relay 2026-07-27-4)
   //   4 = solve_batch rows gain the expired flag: (solved, plies,
   //       nodes, expired) — BREAKING; censored != fact (E4 amendment)
-  m.attr("INTERFACE_VERSION") = 4;
+  //   5 = + successors, successors_dist (relay -9 ask 2: forward
+  //       rule-fire enumeration + prior-weighted distribution)
+  m.attr("INTERFACE_VERSION") = 5;
   m.attr("INTERFACE") = py::make_tuple(
       "parse_sstr", "diff", "canonical", "equivalent",
       "equivalent_mod_const", "verify_edge", "dead_mask", "dead_reason",
-      "predecessors", "solve", "solve_batch", "emit_chain",
-      "frontier_eval", "gate_battery");
+      "predecessors", "successors", "successors_dist", "solve",
+      "solve_batch", "emit_chain", "frontier_eval", "gate_battery");
 }
