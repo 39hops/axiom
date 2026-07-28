@@ -50,6 +50,33 @@ std::string cfg_str(const sym::jsonl::object& o, const std::string& k,
   return it == o.end() ? dflt : it->second;
 }
 
+/** House state-dict tensor-name dialect (relay 2026-07-28-5) →
+    canonical AXNN names. Identity for names already canonical, so
+    mixed containers cannot silently alias. */
+std::string canonical_name(const std::string& n) {
+  if (n == "emb.weight") return "tok_emb.weight";
+  if (n == "norm.g") return "ln_f.weight";
+  if (n.rfind("blocks.", 0) == 0) {
+    const auto dot = n.find('.', 7);
+    if (dot == std::string::npos) return n;
+    const std::string idx = n.substr(7, dot - 7);
+    const std::string suffix = n.substr(dot + 1);
+    static const std::map<std::string, std::string> sfx = {
+        {"n1.g", "ln1.weight"},         {"n2.g", "ln2.weight"},
+        {"qkv.weight", "attn.qkv.weight"},
+        {"qkv.bias", "attn.qkv.bias"},
+        {"o.weight", "attn.o.weight"},  {"o.bias", "attn.o.bias"},
+        {"gate.weight", "ffn.gate.weight"},
+        {"gate.bias", "ffn.gate.bias"},
+        {"up.weight", "ffn.up.weight"}, {"up.bias", "ffn.up.bias"},
+        {"down.weight", "ffn.down.weight"},
+        {"down.bias", "ffn.down.bias"}};
+    const auto it = sfx.find(suffix);
+    if (it != sfx.end()) return "layers." + idx + "." + it->second;
+  }
+  return n;
+}
+
 // ------------------------------------------------------------ kernels
 
 double act_of(double x, int act) {
@@ -183,8 +210,10 @@ std::pair<config, std::map<std::string, tensor>> load_container(
   cfg.eps = cfg_num(cfg_json, "eps", 1e-5);
   cfg.rope_theta = cfg_num(cfg_json, "rope_theta", 10000.0);
   cfg.ffn = cfg_str(cfg_json, "ffn", "fc");
-  cfg.attn_fused =
-      static_cast<int>(cfg_num(cfg_json, "attn_fused", 0.0)) != 0;
+  // house containers spell this as a string ("qkv"); accept any truthy
+  // spelling — the value names the fusion, absence/0 means unfused
+  const std::string fused = cfg_str(cfg_json, "attn_fused", "0");
+  cfg.attn_fused = !(fused == "0" || fused.empty() || fused == "false");
   cfg.head = cfg_str(cfg_json, "head", "auto");
   cfg.axnn_minor =
       static_cast<int>(cfg_num(cfg_json, "axnn_minor", 0.0));
@@ -209,7 +238,8 @@ std::pair<config, std::map<std::string, tensor>> load_container(
     in.read(reinterpret_cast<char*>(t.data.data()),
             static_cast<std::streamsize>(total * sizeof(float)));
     if (!in) throw std::runtime_error("axnn: truncated tensor " + name);
-    tensors.emplace(name, std::move(t));
+    if (!tensors.emplace(canonical_name(name), std::move(t)).second)
+      throw std::runtime_error("axnn: duplicate tensor " + name);
   }
   return {cfg, std::move(tensors)};
 }

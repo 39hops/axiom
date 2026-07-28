@@ -38,7 +38,11 @@
       cfg attn_fused = 1: q,k,v stacked row-wise in one tensor
         layers.{i}.attn.qkv.weight [3D,D] /.bias [3D]
       cfg head = "tied"|"separate": declared (vs inferred-by-absence);
-      validated against tensor presence. */
+      validated against tensor presence.
+    The house state-dict name dialect (relay -5: emb.weight, norm.g,
+    blocks.{i}.{n1.g,n2.g,qkv,o,gate,up,down}) is remapped to the
+    canonical names at read time by load_container; attn_fused accepts
+    the house string spelling ("qkv") as truthy. */
 #include <cstddef>
 #include <map>
 #include <string>
