@@ -115,6 +115,54 @@ family — the L9 analog of the budget-insensitivity diagnostic, and the
 signal for llmopt's mass-targeted diet to tell HEAVY (native-closed)
 from LIGHT (slot-dependent) ODE families.
 
+## The Laplace solving path (relay 2026-07-28-3, in-design)
+
+House input, adopted before implementation starts rather than
+retrofitted: for the constant-coefficient linear families (cc2 and its
+first-order specialization — exactly the L-table's domain), add an
+explicit Laplace chain grammar alongside the direct solving path:
+
+1. **transform rows** — L-table rules (linearity, `L{y'} = s·Y − y0`,
+   `L{y''} = s²·Y − s·y0 − y0'`, `L{e^at} = 1/(s−a)`,
+   `L{cos wt} = s/(s²+w²)`, …): pure lookup + rational algebra in `s`,
+   every coefficient exact Q.
+2. **algebra rows** — solve for `Y(s)`; the differential equation is
+   now division of rational functions.
+3. **pf rows** — partial fractions over Q: the resident pf machinery /
+   poly-continent grammar, unchanged. cc2 characteristic roots ARE the
+   poles.
+4. **inversion rows** — pole → exponential component, read off the
+   table.
+
+Why it earns its place in v1 design:
+- **Determinability**: ICs enter through the transform itself
+  (`L{y'}` carries y0 explicitly), so transform-pair rows are
+  one-primitive-determinable — the underdetermined-coefficient catch
+  on ode_chains rows is structurally absent on this path.
+- **Unification**: one transform threads three resident grammars
+  (poly-pf, exp/trig components, cc2 roots), so bridge rows through
+  shared steps come free, in-language.
+- **Verification legs all exist**: pf identity oracle, exact-Q
+  arithmetic throughout, `check_odesol` at the end. Each of the four
+  row kinds is independently certifiable and streams (killed-worker
+  doctrine).
+- **Vocabulary cost is minimal**: s-plane atoms are ordinary rational
+  functions; the only new vocab is the symbol `s` (and possibly an
+  `L(` carrier if transform steps are emitted as explicit rows rather
+  than resolved in-rule).
+
+Constraints adopted with it:
+- The **L-table is a sha-addressed artifact** (the markov_prior.tsv /
+  byte-pin pattern): one table, both repos certify against it. No
+  inline transform constants in rule code.
+- Scope: L-table families only (constant-coeff linear, forcing terms
+  with rational-pole transforms). Separable and variable-coefficient
+  first-order stay on the direct path; no Laplace heroics outside the
+  table's domain.
+- House owes the atom-set sketch + determinability audit template for
+  transform-pair rows; the table pin and chain emission wait on
+  neither — the pf and inversion legs are testable standalone.
+
 ## Sequence
 
 1. Higher-order Derivative carrier round-trip (parser/printer) + fixture.
@@ -122,7 +170,11 @@ from LIGHT (slot-dependent) ODE families.
    fixture-gated vs sympy checkodesol.
 3. Native mathgen ODE makers (parity vs llmopt odes.py).
 4. Slot-fire-rate counters in solve/emit_chain.
-5. Farm-gate an L9 sample; llmopt adjudicates row shape + dual-oracle.
+5. L-table artifact (sha-pinned) + Laplace chain grammar for cc2-class
+   rows: transform / algebra / pf / inversion row kinds, pf leg reusing
+   the poly machinery, every row verify-certified.
+6. Farm-gate an L9 sample (direct + Laplace paths); llmopt adjudicates
+   row shape + dual-oracle.
 
 ## Self-review
 
@@ -134,3 +186,7 @@ from LIGHT (slot-dependent) ODE families.
   framing keeps the whole port inside proven primitives.
 - The hyper rewrite is the tan arc's method reused, guard included; if a
   third such dialect appears, the pattern is now standard, not novel.
+- The Laplace path adds no soundness surface: every row kind lands on
+  an existing oracle (pf identity, exact-Q algebra, check_odesol), and
+  the table is pinned data, not code — a wrong table entry produces
+  rows that fail certification, never rows that pass wrongly.
