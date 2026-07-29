@@ -33,6 +33,15 @@ namespace ax::mathgen {
     std::domain_error on Mod with m <= 0 or negative/huge exponent. */
 bigint nt_eval(const std::string& s);
 
+/** Call-span resolution trace (Leg B pilot, llmopt relay 2026-07-29-2):
+    for every call site (gcd/Mod) in s, a span
+    "call: <site> -> <value>" with the site text verbatim and the value
+    from nt_eval. Nested calls flatten innermost-first in evaluation
+    order — an outer site's span shows its arguments with inner calls
+    already substituted by their values (the resolution trace, not a
+    tree). Throws like nt_eval on anything outside the grammar. */
+std::vector<std::string> nt_call_spans(const std::string& s);
+
 /** Euclid gcd chain: per division a = q*b + r the rows
     "mul" (q*b), "sub" (a - qb -> r), "gcdstep" (gcd(a, b) ->
     gcd(b, r)), closing "gcdend" (gcd(g, 0) -> g). */

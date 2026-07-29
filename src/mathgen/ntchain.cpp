@@ -139,6 +139,66 @@ std::string lit(const bigint& n) {
   return n.is_negative() ? "(" + s + ")" : s;
 }
 
+/** Resolve every call site in s innermost-first: emit one span per
+    site and return s with each site replaced by its value's
+    spelling (lit, same parenthesization as the emitters). */
+std::string resolve_calls(const std::string& s,
+                          std::vector<std::string>& spans) {
+  std::string out;
+  std::size_t i = 0;
+  while (i < s.size()) {
+    // find the next call-name token at a non-identifier boundary
+    if ((s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z')) {
+      std::size_t j = i;
+      while (j < s.size() && ((s[j] >= 'a' && s[j] <= 'z') ||
+                              (s[j] >= 'A' && s[j] <= 'Z')))
+        ++j;
+      const std::string name = s.substr(i, j - i);
+      if ((name == "gcd" || name == "Mod") && j < s.size() && s[j] == '(') {
+        // match the site's closing paren
+        int depth = 0;
+        std::size_t k = j;
+        for (; k < s.size(); ++k) {
+          if (s[k] == '(') ++depth;
+          if (s[k] == ')' && --depth == 0) break;
+        }
+        if (depth != 0)
+          throw std::invalid_argument("nt_call_spans: unbalanced site in " +
+                                      s);
+        // inner calls first (their spans land before this site's)
+        const std::string args =
+            resolve_calls(s.substr(j + 1, k - j - 1), spans);
+        const std::string site = name + "(" + args + ")";
+        const bigint v = nt_eval(site);
+        spans.push_back("call: " + site + " -> " + v.to_string());
+        out += lit(v);
+        i = k + 1;
+        continue;
+      }
+      out += name;
+      i = j;
+      continue;
+    }
+    out += s[i++];
+  }
+  return out;
+}
+
+}  // namespace
+
+std::vector<std::string> nt_call_spans(const std::string& s) {
+  std::vector<std::string> spans;
+  const std::string resolved = resolve_calls(s, spans);
+  // the resolved string must still evaluate — and to the same value —
+  // or the extraction itself is broken
+  if (!spans.empty() && !(nt_eval(resolved) == nt_eval(s)))
+    throw std::logic_error("nt_call_spans: substitution changed value of " +
+                           s);
+  return spans;
+}
+
+namespace {
+
 /** Row builder: every row is certified by exact evaluation of BOTH
     emitted strings — the oracle runs on the bytes, not the
     construction. */

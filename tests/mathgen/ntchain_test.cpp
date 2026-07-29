@@ -63,6 +63,30 @@ TEST(NtChain, DeterministicBySeed) {
   }
 }
 
+TEST(NtCallSpans, SitesValuesAndNoCalls) {
+  EXPECT_EQ(nt_call_spans("gcd(48, 36)"),
+            (std::vector<std::string>{"call: gcd(48, 36) -> 12"}));
+  EXPECT_EQ(nt_call_spans("Mod(17, 5) + Mod(9, 4)"),
+            (std::vector<std::string>{"call: Mod(17, 5) -> 2",
+                                      "call: Mod(9, 4) -> 1"}));
+  EXPECT_TRUE(nt_call_spans("3*4 + 2**5").empty());
+}
+
+TEST(NtCallSpans, NestedResolvesInnermostFirst) {
+  EXPECT_EQ(nt_call_spans("Mod(gcd(48, 36), 7)"),
+            (std::vector<std::string>{"call: gcd(48, 36) -> 12",
+                                      "call: Mod(12, 7) -> 5"}));
+}
+
+TEST(NtCallSpans, EveryEmittedCurResolves) {
+  // the pilot's certification path: spans over every family's rows
+  const pchain_problem p = make_nt_crt_chain(2, 3);
+  ASSERT_TRUE(p.certified) << p.error;
+  for (const auto& r : p.rows)
+    for (const auto& s : nt_call_spans(r.cur))
+      EXPECT_EQ(s.rfind("call: ", 0), 0u) << s;
+}
+
 TEST(NtChain, BezoutFinalRowMatchesExtGcd) {
   const pchain_problem p = make_nt_bezout_chain(3, 11);
   ASSERT_TRUE(p.certified) << p.error;

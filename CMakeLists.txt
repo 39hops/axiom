@@ -132,5 +132,11 @@ target_link_libraries(axiom-nn-logits PRIVATE axiom)
 add_executable(axiom-nn-exact tools/nn_exact_main.cpp)
 target_link_libraries(axiom-nn-exact PRIVATE axiom)
 
+add_executable(axiom-nn-greedy tools/nn_greedy_main.cpp)
+target_link_libraries(axiom-nn-greedy PRIVATE axiom)
+
+add_executable(axiom-nt-callspan tools/nt_callspan_main.cpp)
+target_link_libraries(axiom-nt-callspan PRIVATE axiom)
+
 add_executable(axiom-nt-chain tools/nt_chain_main.cpp)
 target_link_libraries(axiom-nt-chain PRIVATE axiom)
