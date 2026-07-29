@@ -11,24 +11,53 @@
     the farm (this is a paired-gate diet, not a best-effort shard).
     Sidecar <out>.config.json records the ORDERED vocab_extra atom list
     per the instrument fence: resident atoms first (chars, gcd, Mod,
-    **), then the two new call atoms "call:" and "->" appended LAST. */
+    **), then the two new call atoms "call:" and "->" appended LAST.
+
+    Span modes (arms result relay, 2026-07-29): mode "end" (default)
+    carries the cur site's END VALUE (gcdstep's span is the chain's
+    final gcd). Mode "step" carries the IMMEDIATE step's call — for
+    gcdstep the division step "call: Mod(a, b) -> r" (r the next
+    remainder); every other included kind's cur IS its immediate call,
+    so its span is identical in both modes. Row SELECTION is mode-
+    independent, so same-seed emissions stay row-paired across arms. */
 #include <ax/mathgen/ntchain.hpp>
 #include <ax/sym/jsonl.hpp>
 
 #include <cstdlib>
 #include <fstream>
+#include <stdexcept>
 #include <iostream>
 #include <string>
 #include <vector>
 
+namespace {
+
+/** Step-local span for a gcdstep row: cur is exactly
+    "gcd(<a>, <b>)" (positive literals by construction); the immediate
+    computation is the division remainder Mod(a, b). */
+std::string gcdstep_local_span(const std::string& cur) {
+  if (cur.rfind("gcd(", 0) != 0 || cur.back() != ')')
+    throw std::logic_error("gcdstep cur outside expected spelling: " + cur);
+  const std::string site = "Mod(" + cur.substr(4, cur.size() - 5) + ")";
+  return "call: " + site + " -> " + ax::mathgen::nt_eval(site).to_string();
+}
+
+}  // namespace
+
 int main(int argc, char** argv) {
   using namespace ax;
   if (argc < 2) {
-    std::cerr << "usage: axiom-nt-callspan <out.jsonl> [rows] [seed_base]\n";
+    std::cerr << "usage: axiom-nt-callspan <out.jsonl> [rows] [seed_base] "
+                 "[end|step]\n";
     return 2;
   }
   const long long want = argc > 2 ? std::atoll(argv[2]) : 500;
   const long long seed_base = argc > 3 ? std::atoll(argv[3]) : 1000;
+  const std::string mode = argc > 4 ? argv[4] : "end";
+  if (mode != "end" && mode != "step") {
+    std::cerr << "unknown span mode " << mode << "\n";
+    return 2;
+  }
   std::ofstream out(argv[1]);
   if (!out.good()) {
     std::cerr << "cannot open " << argv[1] << "\n";
@@ -54,9 +83,11 @@ int main(int argc, char** argv) {
         }
         int n = 0;
         for (const auto& r : p.rows) {
-          const auto spans = mathgen::nt_call_spans(r.cur);
+          auto spans = mathgen::nt_call_spans(r.cur);
           const int idx = n++;
           if (spans.empty() || rows >= want) continue;
+          if (mode == "step" && r.kind == "gcdstep")
+            spans = {gcdstep_local_span(r.cur)};
           out << "{\"family\": \"" << p.family
               << "\", \"level\": " << p.level << ", \"seed\": " << seed
               << ", \"n\": " << idx << ", \"kind\": \"" << r.kind
@@ -78,7 +109,7 @@ int main(int argc, char** argv) {
   cfg << "{\"tool\": \"axiom-nt-callspan\", \"rows\": " << rows
       << ", \"problems_farmed\": " << problems
       << ", \"seed_base\": " << seed_base
-      << ", \"level_mix\": [1, 2, 3, 3], "
+      << ", \"span_mode\": \"" << mode << "\", \"level_mix\": [1, 2, 3, 3], "
          "\"families\": [\"nt_gcd\", \"nt_bezout\", \"nt_modinv\", "
          "\"nt_crt\", \"nt_modexp\", \"nt_cf\"], "
          "\"vocab_extra_ordered\": {\"chars\": \"0123456789+-*(), \", "
