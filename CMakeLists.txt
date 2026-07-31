@@ -135,6 +135,9 @@ target_link_libraries(axiom-nn-exact PRIVATE axiom)
 add_executable(axiom-nn-greedy tools/nn_greedy_main.cpp)
 target_link_libraries(axiom-nn-greedy PRIVATE axiom)
 
+add_executable(axiom-nn-moe-greedy tools/nn_moe_greedy_main.cpp)
+target_link_libraries(axiom-nn-moe-greedy PRIVATE axiom)
+
 add_executable(axiom-nt-callspan tools/nt_callspan_main.cpp)
 target_link_libraries(axiom-nt-callspan PRIVATE axiom)
 

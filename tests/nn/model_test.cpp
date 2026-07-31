@@ -154,6 +154,46 @@ TEST(Nn, SwigluForwardDeterministicAndValidated) {
                std::runtime_error);
 }
 
+TEST(Nn, SwitchTop1GateScalesAndValidates) {
+  config cfg = tiny_cfg();
+  cfg.ffn = "swiglu";
+  cfg.act = "silu";
+  cfg.axnn_minor = 2;
+  cfg.ffn_gate = "switch_top1";
+  cfg.n_experts = 4;
+  auto t = swiglu_tensors(cfg, 71);
+  std::mt19937 rng(9);
+  std::normal_distribution<float> nd(0.0f, 0.05f);
+  for (int i = 0; i < cfg.n_layers; ++i) {
+    tensor r;
+    r.dims = {4, static_cast<std::size_t>(cfg.d_model)};
+    r.data.resize(4 * cfg.d_model);
+    for (float& v : r.data) v = nd(rng);
+    t["layers." + std::to_string(i) + ".ffn.router.weight"] = r;
+  }
+  const auto gated = model::from_parts(cfg, t);
+  const std::vector<int> toks{3, 7, 1, 10};
+  EXPECT_EQ(gated.logits(toks), gated.logits(toks));
+  // a uniform router (max prob 1/E) must differ from the ungated model
+  config plain_cfg = cfg;
+  plain_cfg.ffn_gate = "";
+  plain_cfg.n_experts = 0;
+  auto plain_t = t;
+  for (int i = 0; i < cfg.n_layers; ++i)
+    plain_t.erase("layers." + std::to_string(i) + ".ffn.router.weight");
+  const auto plain = model::from_parts(plain_cfg, plain_t);
+  EXPECT_NE(gated.logits(toks), plain.logits(toks));
+  // friendly-fire: gate needs the minor, the tensor, and the count
+  config undeclared = cfg;
+  undeclared.axnn_minor = 1;
+  EXPECT_THROW(model::from_parts(undeclared, t), std::runtime_error);
+  auto missing = t;
+  missing.erase("layers.0.ffn.router.weight");
+  EXPECT_THROW(model::from_parts(cfg, missing), std::runtime_error);
+  // stray router tensor without the declaration must not load
+  EXPECT_THROW(model::from_parts(plain_cfg, t), std::runtime_error);
+}
+
 TEST(Nn, HeadDeclarationValidated) {
   config cfg = tiny_cfg();
   cfg.head = "tied";
