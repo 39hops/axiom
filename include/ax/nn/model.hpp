@@ -42,7 +42,17 @@
     The house state-dict name dialect (relay -5: emb.weight, norm.g,
     blocks.{i}.{n1.g,n2.g,qkv,o,gate,up,down}) is remapped to the
     canonical names at read time by load_container; attn_fused accepts
-    the house string spelling ("qkv") as truthy. */
+    the house string spelling ("qkv") as truthy.
+
+    v1.2 (axnn_minor 2, relay 2026-07-31 merged-crystal ask): the
+    merged Hebbian-MoE endpoint is dense-plus-scalar-gate — per block
+    the FFN output is scaled by the winning router probability,
+    y = x + max_i softmax(R h)_i * FFN(h), R one [E, D] matrix kept
+    from the switch MoE. Declared as
+      cfg ffn_gate = "switch_top1", n_experts = E
+        layers.{i}.ffn.router.weight [E,D]
+        (house dialect: blocks.{i}.moe.router.weight)
+    Absent ffn_gate = plain residual FFN (v1/v1.1 behavior). */
 #include <cstddef>
 #include <map>
 #include <string>
@@ -65,6 +75,9 @@ struct config {
   bool attn_fused = false;    // one qkv tensor [3D,D] vs separate q/k/v
   std::string head = "auto";  // auto (infer by presence) | tied | separate
   int axnn_minor = 0;
+  // v1.2 (axnn_minor 2): merged-MoE scalar gate on the FFN output
+  std::string ffn_gate = "";  // "" (none) | switch_top1
+  int n_experts = 0;
 };
 
 struct tensor {

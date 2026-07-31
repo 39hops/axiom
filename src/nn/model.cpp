@@ -70,7 +70,8 @@ std::string canonical_name(const std::string& n) {
         {"gate.bias", "ffn.gate.bias"},
         {"up.weight", "ffn.up.weight"}, {"up.bias", "ffn.up.bias"},
         {"down.weight", "ffn.down.weight"},
-        {"down.bias", "ffn.down.bias"}};
+        {"down.bias", "ffn.down.bias"},
+        {"moe.router.weight", "ffn.router.weight"}};
     const auto it = sfx.find(suffix);
     if (it != sfx.end()) return "layers." + idx + "." + it->second;
   }
@@ -134,12 +135,18 @@ void model::validate() const {
   if (cfg_.head != "auto" && cfg_.head != "tied" &&
       cfg_.head != "separate")
     throw std::runtime_error("axnn: unknown head " + cfg_.head);
-  if (cfg_.axnn_minor < 0 || cfg_.axnn_minor > 1)
+  if (cfg_.axnn_minor < 0 || cfg_.axnn_minor > 2)
     throw std::runtime_error("axnn: unsupported axnn_minor");
   // v1.1 features require the minor to be declared (friendly-fire:
   // an old writer cannot silently emit tensors a v1 reader drops)
   if (cfg_.axnn_minor < 1 && (cfg_.ffn != "fc" || cfg_.attn_fused))
     throw std::runtime_error("axnn: v1.1 feature without axnn_minor 1");
+  if (cfg_.ffn_gate != "" && cfg_.ffn_gate != "switch_top1")
+    throw std::runtime_error("axnn: unknown ffn_gate " + cfg_.ffn_gate);
+  if (cfg_.axnn_minor < 2 && cfg_.ffn_gate != "")
+    throw std::runtime_error("axnn: v1.2 feature without axnn_minor 2");
+  if (cfg_.ffn_gate != "" && cfg_.n_experts < 2)
+    throw std::runtime_error("axnn: ffn_gate requires n_experts >= 2");
   need("tok_emb.weight", V, D);
   if (cfg_.pos == "learned")
     need("pos_emb.weight", static_cast<std::size_t>(cfg_.max_seq), D);
@@ -173,6 +180,11 @@ void model::validate() const {
       need(L + "ffn.fc2.weight", D, F);
       optional(L + "ffn.fc2.bias", D);
     }
+    if (cfg_.ffn_gate == "switch_top1")
+      need(L + "ffn.router.weight",
+           static_cast<std::size_t>(cfg_.n_experts), D);
+    else if (t_.count(L + "ffn.router.weight"))
+      throw std::runtime_error("axnn: router tensor without ffn_gate");
   }
   need("ln_f.weight", D, 0);
   optional("ln_f.bias", D);
@@ -217,6 +229,8 @@ std::pair<config, std::map<std::string, tensor>> load_container(
   cfg.head = cfg_str(cfg_json, "head", "auto");
   cfg.axnn_minor =
       static_cast<int>(cfg_num(cfg_json, "axnn_minor", 0.0));
+  cfg.ffn_gate = cfg_str(cfg_json, "ffn_gate", "");
+  cfg.n_experts = static_cast<int>(cfg_num(cfg_json, "n_experts", 0.0));
 
   std::map<std::string, tensor> tensors;
   while (in.peek() != std::ifstream::traits_type::eof()) {
@@ -432,6 +446,23 @@ std::vector<float> model::logits(const std::vector<int>& tokens) const {
       for (double& v2 : f1) v2 = act_of(v2, act);
       f2 = linear(f1, F, D, W(L + "ffn.fc2.weight"),
                   bias(L + "ffn.fc2.bias"));
+    }
+    if (cfg_.ffn_gate == "switch_top1") {
+      // merged Hebbian-MoE endpoint: scale the FFN output by the
+      // winning router probability, per token (v1.2 declaration)
+      const std::size_t E = static_cast<std::size_t>(cfg_.n_experts);
+      const auto rl =
+          linear(h2, D, E, W(L + "ffn.router.weight"), nullptr);
+      for (std::size_t t = 0; t < T; ++t) {
+        double mx = rl[t * E];
+        for (std::size_t e = 1; e < E; ++e)
+          mx = std::max(mx, rl[t * E + e]);
+        double z = 0;
+        for (std::size_t e = 0; e < E; ++e)
+          z += std::exp(rl[t * E + e] - mx);
+        const double top_p = 1.0 / z;  // exp(mx - mx) / z
+        for (std::size_t d = 0; d < D; ++d) f2[t * D + d] *= top_p;
+      }
     }
     for (std::size_t i = 0; i < T * D; ++i) x[i] += f2[i];
   }
