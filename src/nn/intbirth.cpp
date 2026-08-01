@@ -475,6 +475,230 @@ Mat block::body_fwd(const std::map<std::string, Mat>& w, const Mat& x,
   return ffn_fwd(w, attn_fwd(w, x, c), c);
 }
 
+// ------------------------------------------------------- MoE body
+
+namespace {
+std::vector<std::string> moe_body_keys(int E) {
+  std::vector<std::string> k = {"wq", "wk", "wv", "wo",
+                                "g1", "g2", "wr"};
+  for (int e = 0; e < E; e++)
+    for (const char* s : {".wg", ".wu", ".wd"})
+      k.push_back("e" + std::to_string(e) + s);
+  return k;
+}
+}  // namespace
+
+Mat block::moe_body_fwd(const std::map<std::string, Mat>& w,
+                        const Mat& x, block_cache& c) const {
+  const int T = c_.T, D = c_.D, F = c_.F, E = c_.n_experts;
+  const i64 PQ = c_.pq, CL = c_.act_clamp;
+  if (E < 1) throw std::runtime_error("intbirth: E < 1");
+  for (const auto& k : moe_body_keys(E))
+    if (!w.count(k))
+      throw std::runtime_error("intbirth: missing " + k);
+  if (i64(w.at("wr").size()) != i64(E) * D)
+    throw std::runtime_error("intbirth: bad wr shape");
+  const Mat& sil = tab_.at("silu.tab");
+
+  attn_fwd(w, x, c);  // fills c.x .. c.x1
+  c.h2 = rms_fwd(c.x1, w.at("g2"), c.i2);
+
+  // router: r = rdiv(h2 @ wr^T, Q); p_r = softmax(PQ); top-1,
+  // lowest expert index wins ties (strict > scanning upward)
+  c.r = int_gemm(c.h2, T, D, w.at("wr"), E);
+  rdiv_inplace(c.r, Q);
+  c.pr = softmax_rows(c.r, T, E, PQ);
+  c.top.assign(T, 0);
+  c.top_p.assign(T, 0);
+  for (int t = 0; t < T; t++) {
+    int best = 0;
+    for (int e = 1; e < E; e++)
+      if (c.pr[std::size_t(t) * E + e] >
+          c.pr[std::size_t(t) * E + best])
+        best = e;
+    c.top[t] = best;
+    c.top_p[t] = c.pr[std::size_t(t) * E + best];
+  }
+
+  // selected expert's FFN per row (per-row independent, so
+  // computing row t with expert top[t]'s weights is exact)
+  c.egp.assign(std::size_t(T) * F, 0);
+  c.eu.assign(std::size_t(T) * F, 0);
+  c.esg.assign(std::size_t(T) * F, 0);
+  c.ef.assign(std::size_t(T) * F, 0);
+  c.eout.assign(std::size_t(T) * D, 0);
+  for (int t = 0; t < T; t++) {
+    const std::string p = "e" + std::to_string(c.top[t]);
+    const Mat& wg = w.at(p + ".wg");
+    const Mat& wu = w.at(p + ".wu");
+    const Mat& wd = w.at(p + ".wd");
+    for (int f = 0; f < F; f++) {
+      i64 ag = 0, au = 0;
+      for (int d = 0; d < D; d++) {
+        const i64 h = c.h2[std::size_t(t) * D + d];
+        ag += h * wg[std::size_t(f) * D + d];
+        au += h * wu[std::size_t(f) * D + d];
+      }
+      const i64 z = rdiv(ag, Q);
+      c.egp[std::size_t(t) * F + f] = z;
+      c.eu[std::size_t(t) * F + f] = rdiv(au, Q);
+      c.esg[std::size_t(t) * F + f] =
+          z > ts_ ? z : z < -ts_ ? 0 : sil[z + ts_];
+      c.ef[std::size_t(t) * F + f] =
+          rdiv(c.esg[std::size_t(t) * F + f] *
+                   c.eu[std::size_t(t) * F + f],
+               Q);
+    }
+    for (int d = 0; d < D; d++) {
+      i64 acc = 0;
+      for (int f = 0; f < F; f++)
+        acc += c.ef[std::size_t(t) * F + f] *
+               wd[std::size_t(d) * F + f];
+      c.eout[std::size_t(t) * D + d] = rdiv(acc, Q);
+    }
+  }
+
+  // gate + residual + clamp (fx3 multiplicative-gate convention)
+  Mat pre2(std::size_t(T) * D);
+  for (int t = 0; t < T; t++)
+    for (int d = 0; d < D; d++)
+      pre2[std::size_t(t) * D + d] =
+          rdiv(c.eout[std::size_t(t) * D + d] * c.top_p[t], PQ) +
+          c.x1[std::size_t(t) * D + d];
+  c.m2.assign(pre2.size(), 0);
+  c.x2.assign(pre2.size(), 0);
+  for (std::size_t i = 0; i < pre2.size(); i++) {
+    c.m2[i] = (pre2[i] <= CL && pre2[i] >= -CL);
+    c.x2[i] = clampi(pre2[i], -CL, CL);
+  }
+  return c.x2;
+}
+
+std::map<std::string, Mat> block::moe_body_bwd(
+    const std::map<std::string, Mat>& w, const Mat& dxin,
+    const block_cache& c, Mat* dx0_out) const {
+  const int T = c_.T, D = c_.D, F = c_.F, E = c_.n_experts;
+  const i64 PQ = c_.pq;
+  if (E < 1) throw std::runtime_error("intbirth: E < 1");
+  if (i64(dxin.size()) != i64(T) * D)
+    throw std::runtime_error("intbirth: bad dxin shape");
+  const Mat& dsl = tab_.at("dsilu.tab");
+  std::map<std::string, Mat> G;
+
+  Mat dx2 = dxin;
+  for (std::size_t i = 0; i < dx2.size(); i++) dx2[i] *= c.m2[i];
+
+  // gate chain: d(out) = rdiv(dx2 * top_p, PQ);
+  // d(top_p)[t] = rdiv(sum_d out[t,d]*dx2[t,d], PQ)
+  Mat dout(std::size_t(T) * D);
+  Mat dtp(T);
+  for (int t = 0; t < T; t++) {
+    i64 acc = 0;
+    for (int d = 0; d < D; d++) {
+      const std::size_t i = std::size_t(t) * D + d;
+      dout[i] = rdiv(dx2[i] * c.top_p[t], PQ);
+      acc += c.eout[i] * dx2[i];
+    }
+    dtp[t] = rdiv(acc, PQ);
+  }
+
+  // expert FFN backward per row; dW accumulated RAW per expert,
+  // one rdiv(Q) per expert after the token loop (the rdiv-grouping
+  // rule: same placement as the dense xty-then-round)
+  for (int e = 0; e < E; e++) {
+    const std::string p = "e" + std::to_string(e);
+    G[p + ".wg"].assign(std::size_t(F) * D, 0);
+    G[p + ".wu"].assign(std::size_t(F) * D, 0);
+    G[p + ".wd"].assign(std::size_t(D) * F, 0);
+  }
+  Mat dh2(std::size_t(T) * D, 0);
+  Mat df(F), du(F), dgp(F);
+  for (int t = 0; t < T; t++) {
+    const std::string p = "e" + std::to_string(c.top[t]);
+    const Mat& wg = w.at(p + ".wg");
+    const Mat& wu = w.at(p + ".wu");
+    const Mat& wd = w.at(p + ".wd");
+    Mat& Gwg = G.at(p + ".wg");
+    Mat& Gwu = G.at(p + ".wu");
+    Mat& Gwd = G.at(p + ".wd");
+    for (int f = 0; f < F; f++) {
+      i64 acc = 0;
+      for (int d = 0; d < D; d++)
+        acc += dout[std::size_t(t) * D + d] *
+               wd[std::size_t(d) * F + f];
+      df[f] = rdiv(acc, Q);
+      const i64 z = c.egp[std::size_t(t) * F + f];
+      const i64 dsv = z > ts_ ? Q : z < -ts_ ? 0 : dsl[z + ts_];
+      du[f] = rdiv(c.esg[std::size_t(t) * F + f] * df[f], Q);
+      dgp[f] = rdiv(
+          rdiv(c.eu[std::size_t(t) * F + f] * df[f], Q) * dsv, Q);
+    }
+    for (int f = 0; f < F; f++)
+      for (int d = 0; d < D; d++) {
+        Gwg[std::size_t(f) * D + d] +=
+            dgp[f] * c.h2[std::size_t(t) * D + d];
+        Gwu[std::size_t(f) * D + d] +=
+            du[f] * c.h2[std::size_t(t) * D + d];
+      }
+    for (int d = 0; d < D; d++)
+      for (int f = 0; f < F; f++)
+        Gwd[std::size_t(d) * F + f] +=
+            dout[std::size_t(t) * D + d] *
+            c.ef[std::size_t(t) * F + f];
+    // dh2 from expert weights (two-term sum, one rdiv after loop)
+    for (int d = 0; d < D; d++) {
+      i64 acc = 0;
+      for (int f = 0; f < F; f++)
+        acc += du[f] * wu[std::size_t(f) * D + d] +
+               dgp[f] * wg[std::size_t(f) * D + d];
+      dh2[std::size_t(t) * D + d] = acc;
+    }
+  }
+  for (int e = 0; e < E; e++) {
+    const std::string p = "e" + std::to_string(e);
+    rdiv_inplace(G.at(p + ".wg"), Q);
+    rdiv_inplace(G.at(p + ".wu"), Q);
+    rdiv_inplace(G.at(p + ".wd"), Q);
+  }
+  rdiv_inplace(dh2, Q);
+
+  // router: scatter d(top_p) into dp_r, softmax_bwd at PQ, then
+  // wr + h2 paths (each group finalized once, then summed)
+  Mat dpr(std::size_t(T) * E, 0);
+  for (int t = 0; t < T; t++)
+    dpr[std::size_t(t) * E + c.top[t]] = dtp[t];
+  Mat dr(std::size_t(T) * E);
+  for (int t = 0; t < T; t++) {
+    i64 inner = 0;
+    for (int e = 0; e < E; e++)
+      inner += rdiv(c.pr[std::size_t(t) * E + e] *
+                        dpr[std::size_t(t) * E + e],
+                    PQ);
+    for (int e = 0; e < E; e++)
+      dr[std::size_t(t) * E + e] =
+          rdiv(c.pr[std::size_t(t) * E + e] *
+                   (dpr[std::size_t(t) * E + e] - inner),
+               PQ);
+  }
+  G["wr"] = int_gemm_xty(dr, T, E, c.h2, D);
+  rdiv_inplace(G["wr"], Q);
+  {
+    Mat dh2r = int_gemm_nt(dr, T, E, w.at("wr"), D);
+    rdiv_inplace(dh2r, Q);
+    for (std::size_t i = 0; i < dh2.size(); i++) dh2[i] += dh2r[i];
+  }
+
+  Mat dx1 = rms_bwd(dh2, c.x1, w.at("g2"), c.i2, G["g2"]);
+  for (std::size_t i = 0; i < dx1.size(); i++)
+    dx1[i] = (dx1[i] + dx2[i]) * c.m1[i];
+  Mat dx0 = attn_bwd(w, dx1, c, G);
+  if (dx0_out) {
+    for (std::size_t i = 0; i < dx0.size(); i++) dx0[i] += dx1[i];
+    *dx0_out = std::move(dx0);
+  }
+  return G;
+}
+
 Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
                block_cache& c) const {
   check_weights(w);

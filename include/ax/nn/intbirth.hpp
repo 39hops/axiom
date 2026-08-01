@@ -61,6 +61,10 @@ void rdiv_inplace(Mat& m, i64 d);
 struct contract {
   int T = 32, D = 64, DH = 16, F = 128, V = 64;
   int n_blocks = 1;           // multi-block anatomy (mb spec)
+  int n_experts = 0;          // gravmoe: E experts at the FFN seam
+                              // (0 = dense body; MoE path needs >=1)
+  i64 grav_k = 100;           // gravity every K optimizer steps
+  i64 grav_ln = 0, grav_ld = 1;  // lambda = LN/LD; LN=0 = off
   int shift = 12;             // Q_w = Q << shift
   i64 gboost = 256;           // backward boost (unboost at optimizer)
   i64 pq = 8192;              // attention-prob carry scale
@@ -73,6 +77,11 @@ struct contract {
 struct block_cache {
   Mat x, h1, i1, q0, k0, v0, qr, kr, p, a, m1, x1, h2, i2, gp, u, sg,
       f, m2, x2, h3, i3;
+  // gravmoe MoE fields: router logits/probs, top-1 choice + prob,
+  // and the SELECTED expert's FFN intermediates laid out [T,*]
+  // (row t holds expert top[t]'s values)
+  Mat r, pr, top_p, egp, eu, esg, ef, eout;
+  std::vector<int> top;
 };
 
 /** The R2b block: fwd/bwd/softmax over Q-scale weights (KEYS-order
@@ -110,6 +119,16 @@ class block {
   Mat rms_fwd(const Mat& x, const Mat& g, Mat& isq_out) const;
   Mat rms_bwd(const Mat& dy, const Mat& x, const Mat& g,
               const Mat& isq, Mat& dg_out) const;
+
+  // ---- MoE Body (gravmoe spec): attn half shared; FFN becomes
+  // E experts (per-expert wg/wu/wd), top-1 router wr [E,D] with
+  // fx3 multiplicative gate y = rdiv(out_top * top_p, PQ).
+  // Weight names: wq wk wv wo g1 g2, wr, e{j}.wg/.wu/.wd.
+  Mat moe_body_fwd(const std::map<std::string, Mat>& w, const Mat& x,
+                   block_cache& cache) const;
+  std::map<std::string, Mat> moe_body_bwd(
+      const std::map<std::string, Mat>& w, const Mat& dxin,
+      const block_cache& cache, Mat* dx0_out) const;
 
   static const char* const KEYS[11];
   static const char* const BODY_KEYS[9];
