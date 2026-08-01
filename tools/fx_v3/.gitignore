@@ -1,0 +1,4 @@
+fx_v3_decode
+*.bin
+cpp_*.txt
+cpp_*.sha
