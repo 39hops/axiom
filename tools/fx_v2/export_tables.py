@@ -15,7 +15,8 @@ before parsing, and the Unpickler whitelist rejects every global
 except OrderedDict / _rebuild_tensor_v2 / LongStorage — no arbitrary
 class construction is reachable.
 
-Usage: python export_tables.py <p3_tables.pt> <out.bin>
+Usage: python export_tables.py <tables.pt> <out.bin> [expected_sha256]
+(the FX-V1-H p3_tables pin is the default; FX-V3 passes its own)
 """
 import hashlib
 import io
@@ -50,10 +51,10 @@ class U(pickle.Unpickler):
         return {"key": key, "numel": numel}
 
 
-def main(src, dst):
+def main(src, dst, pin=PIN):
     raw = open(src, "rb").read()
     sha = hashlib.sha256(raw).hexdigest()
-    assert sha == PIN, f"sha mismatch: {sha}"
+    assert sha == pin, f"sha mismatch: {sha}"
     z = zipfile.ZipFile(io.BytesIO(raw))
     root = z.namelist()[0].split("/")[0]
     d = U(io.BytesIO(z.read(f"{root}/data.pkl"))).load()
@@ -74,4 +75,4 @@ def main(src, dst):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(*sys.argv[1:4])
