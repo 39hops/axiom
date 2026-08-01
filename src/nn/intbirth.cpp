@@ -1165,4 +1165,210 @@ void multi_birth::step_once() {
   step_ += 1;
 }
 
+// -------------------------------------------------------- moe_birth
+
+moe_birth::moe_birth(const std::string& tables_bytes,
+                     const std::string& init_bytes, const contract& c,
+                     const std::string& windows_bytes)
+    : blk_(tables_bytes, c), opt_(c.shift, c.lrn, c.lrd) {
+  if (c.n_blocks < 1)
+    throw std::runtime_error("intbirth: n_blocks < 1");
+  if (c.n_experts < 1)
+    throw std::runtime_error("intbirth: n_experts < 1");
+  const auto sh = shapes(c);
+  order_.push_back("emb");
+  for (int b = 0; b < c.n_blocks; b++) {
+    const std::string bp = "b" + std::to_string(b) + ".";
+    for (const char* k : {"wq", "wk", "wv", "wo", "g1", "g2", "wr"})
+      order_.push_back(bp + k);
+    for (int e = 0; e < c.n_experts; e++)
+      for (const char* k : {"wg", "wu", "wd"})
+        order_.push_back(bp + "e" + std::to_string(e) + "." + k);
+  }
+  order_.push_back("g_f");
+  const auto numel = [&](const std::string& name) -> std::size_t {
+    if (name == "emb") return std::size_t(c.V) * c.D;
+    if (name == "g_f") return std::size_t(c.D);
+    const std::string leaf = name.substr(name.rfind('.') + 1);
+    if (leaf == "wr") return std::size_t(c.n_experts) * c.D;
+    const auto s = sh.at(leaf);
+    return std::size_t(s.r) * s.c;
+  };
+  std::size_t off = 0;
+  const auto take = [&](std::size_t n) {
+    if (off + n * 8 > init_bytes.size())
+      throw std::runtime_error("intbirth: truncated init");
+    Mat m(n);
+    std::memcpy(m.data(), init_bytes.data() + off, n * 8);
+    off += n * 8;
+    return m;
+  };
+  for (const auto& name : order_) w_[name] = take(numel(name));
+  if (windows_bytes.empty()) {
+    wtok_.push_back(take(std::size_t(c.T)));
+    wtgt_.push_back(take(std::size_t(c.T)));
+  } else {
+    const std::size_t rec = std::size_t(c.T) * 2 * 8;
+    if (windows_bytes.size() % rec)
+      throw std::runtime_error("intbirth: bad windows length");
+    const std::size_t nw = windows_bytes.size() / rec;
+    for (std::size_t i = 0; i < nw; i++) {
+      Mat tk(c.T), tg(c.T);
+      std::memcpy(tk.data(), windows_bytes.data() + i * rec,
+                  std::size_t(c.T) * 8);
+      std::memcpy(tg.data(),
+                  windows_bytes.data() + i * rec + std::size_t(c.T) * 8,
+                  std::size_t(c.T) * 8);
+      wtok_.push_back(std::move(tk));
+      wtgt_.push_back(std::move(tg));
+    }
+  }
+  if (off != init_bytes.size())
+    throw std::runtime_error("intbirth: trailing init bytes");
+  for (const Mat& tk : wtok_)
+    for (const i64 t : tk)
+      if (t < 0 || t >= c.V)
+        throw std::runtime_error("intbirth: token out of vocab");
+  for (const Mat& tg : wtgt_)
+    for (const i64 t : tg)
+      if (t < 0 || t >= c.V)
+        throw std::runtime_error("intbirth: target out of vocab");
+  for (const auto& name : order_)
+    for (auto& v : w_[name]) v <<= c.shift;  // lift to Q_w
+}
+
+void moe_birth::run(int steps) {
+  for (int i = 0; i < steps; i++) step_once();
+}
+
+std::string moe_birth::mark() {
+  for (const auto& name : order_)
+    th_.update(w_.at(name).data(), w_.at(name).size() * 8);
+  return traj_sha();
+}
+
+std::string moe_birth::traj_sha() const {
+  detail::sha256 peek = th_;
+  return peek.hex();
+}
+
+std::string moe_birth::weights_bytes() const {
+  std::string out;
+  for (const auto& name : order_) {
+    const auto& w = w_.at(name);
+    out.append(reinterpret_cast<const char*>(w.data()), w.size() * 8);
+  }
+  return out;
+}
+
+void moe_birth::step_once() {
+  const contract& c = blk_.cfg();
+  const int T = c.T, D = c.D, V = c.V, NB = c.n_blocks;
+  const i64 gb = c.gboost * 4;  // GB = 4 x GBOOST (gravmoe spec)
+  const Mat& tok = wtok_[std::size_t(step_) % wtok_.size()];
+  const Mat& tgt = wtgt_[std::size_t(step_) % wtgt_.size()];
+  // Q-scale view of the wide params (the matmul boundary)
+  std::map<std::string, Mat> nar;
+  for (const auto& name : order_) {
+    nar[name] = w_.at(name);
+    for (auto& v : nar[name]) v = rdiv(v, i64(1) << c.shift);
+  }
+  const Mat& emb = nar.at("emb");
+  // per-body weight views (MoE names, body-local)
+  std::vector<std::map<std::string, Mat>> bw(NB);
+  for (int b = 0; b < NB; b++) {
+    const std::string bp = "b" + std::to_string(b) + ".";
+    for (const char* k : {"wq", "wk", "wv", "wo", "g1", "g2", "wr"})
+      bw[b][k] = nar.at(bp + k);
+    for (int e = 0; e < c.n_experts; e++)
+      for (const char* k : {"wg", "wu", "wd"}) {
+        const std::string ek = "e" + std::to_string(e) + "." + k;
+        bw[b][ek] = nar.at(bp + ek);
+      }
+  }
+
+  // ---- forward: emb lookup -> MoE bodies -> final norm -> tied head
+  Mat x(std::size_t(T) * D);
+  for (int t = 0; t < T; t++)
+    for (int d = 0; d < D; d++)
+      x[std::size_t(t) * D + d] = emb[std::size_t(tok[t]) * D + d];
+  std::vector<block_cache> bc(NB);
+  for (int b = 0; b < NB; b++) x = blk_.moe_body_fwd(bw[b], x, bc[b]);
+  Mat i_f;
+  const Mat xf = x;
+  const Mat hf = blk_.rms_fwd(xf, nar.at("g_f"), i_f);
+  Mat logits = int_gemm(hf, T, D, emb, V);  // tied head
+  rdiv_inplace(logits, Q);
+
+  // ---- loss + CE gradient (boosted at GB)
+  const Mat pp = blk_.softmax_rows(logits, T, V, Q);
+  i64 loss = 0;
+  for (int t = 0; t < T; t++)
+    loss += Q - pp[std::size_t(t) * V + tgt[t]];
+  loss_ = loss;
+  Mat dlogits(std::size_t(T) * V);
+  for (int t = 0; t < T; t++)
+    for (int vv = 0; vv < V; vv++)
+      dlogits[std::size_t(t) * V + vv] =
+          (pp[std::size_t(t) * V + vv] - Q * (tgt[t] == vv)) * gb;
+
+  // ---- backward
+  std::map<std::string, Mat> G;
+  Mat g_head = int_gemm_xty(dlogits, T, V, hf, D);
+  rdiv_inplace(g_head, Q);
+  Mat dhf = int_gemm_nt(dlogits, T, V, emb, D);
+  rdiv_inplace(dhf, Q);
+  Mat dx = blk_.rms_bwd(dhf, xf, nar.at("g_f"), i_f, G["g_f"]);
+  for (int b = NB - 1; b >= 0; b--) {
+    Mat dx0;
+    auto Gb = blk_.moe_body_bwd(bw[b], dx, bc[b], &dx0);
+    const std::string bp = "b" + std::to_string(b) + ".";
+    for (auto& [k, g] : Gb) G[bp + k] = std::move(g);
+    dx = std::move(dx0);
+  }
+  // embedding: rounded head part + exact scatter-add (the
+  // rdiv-grouping rule, unchanged from mb)
+  Mat g_emb = std::move(g_head);
+  for (int t = 0; t < T; t++)
+    for (int d = 0; d < D; d++)
+      g_emb[std::size_t(tok[t]) * D + d] += dx[std::size_t(t) * D + d];
+  G["emb"] = std::move(g_emb);
+
+  // ---- optimizer over param_order (unboost at GB)
+  std::vector<Mat*> params;
+  std::vector<Mat> unboosted;
+  unboosted.reserve(order_.size());
+  for (const auto& name : order_) {
+    Mat g = std::move(G.at(name));
+    for (auto& v : g) v = rdiv(v, Q * gb);
+    unboosted.push_back(std::move(g));
+    params.push_back(&w_.at(name));
+  }
+  std::vector<const Mat*> gp;
+  for (const auto& g : unboosted) gp.push_back(&g);
+  opt_.step(params, gp);
+  step_ += 1;
+
+  // ---- gravity event (wide Q_w space, after the optimizer step)
+  if (c.grav_k > 0 && step_ % c.grav_k == 0 && c.grav_ln != 0) {
+    static const char* const KINDS[3] = {"wg", "wu", "wd"};
+    for (int b = 0; b < NB; b++)
+      for (const char* kind : KINDS) {
+        std::vector<Mat*> ws;
+        for (int e = 0; e < c.n_experts; e++)
+          ws.push_back(&w_.at("b" + std::to_string(b) + ".e" +
+                              std::to_string(e) + "." + kind));
+        const std::size_t n = ws[0]->size();
+        for (std::size_t i = 0; i < n; i++) {
+          i64 s = 0;
+          for (Mat* wp : ws) s += (*wp)[i];
+          const i64 mean = rdiv(s, c.n_experts);  // finalized ONCE
+          for (Mat* wp : ws)
+            (*wp)[i] +=
+                rdiv((mean - (*wp)[i]) * c.grav_ln, c.grav_ld);
+        }
+      }
+  }
+}
+
 }  // namespace ax::nn::ib

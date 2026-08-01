@@ -34,6 +34,7 @@ using ax::nn::ib::contract;
 using ax::nn::ib::full_birth;
 using ax::nn::ib::i64;
 using ax::nn::ib::Mat;
+using ax::nn::ib::moe_birth;
 using ax::nn::ib::multi_birth;
 
 namespace {
@@ -370,4 +371,34 @@ PYBIND11_MODULE(intbirth, m) {
       .def_property_readonly("step_count", &multi_birth::step_count)
       .def_property_readonly("loss", &multi_birth::last_loss)
       .def_property_readonly("nz", &multi_birth::nz_last);
+
+  py::class_<moe_birth>(m, "MoeBirth")
+      .def(py::init([](const py::bytes& tables, const py::bytes& init,
+                       const py::dict& c, const py::bytes& windows) {
+             return new moe_birth(std::string(tables),
+                                  std::string(init),
+                                  contract_from_dict(c),
+                                  std::string(windows));
+           }),
+           py::arg("tables_bytes"), py::arg("init_bytes"),
+           py::arg("contract"),
+           py::arg("windows_bytes") = py::bytes(),
+           "the gravmoe anatomy: mb stack with E-expert MoE FFN per "
+           "body, GB = 4 x GBOOST, window cycling, gravity every K "
+           "optimizer steps (contract keys E/K/LN/LD). init in "
+           "param_order (emb, b{i}.[wq wk wv wo g1 g2 wr, "
+           "e{j}.wg/.wu/.wd], g_f) + tok+tgt tail iff no windows")
+      .def("run", &moe_birth::run, py::arg("steps"),
+           py::call_guard<py::gil_scoped_release>())
+      .def("mark", &moe_birth::mark)
+      .def("traj_sha", &moe_birth::traj_sha)
+      .def("milestone_sha", &moe_birth::traj_sha)
+      .def("weights_bytes",
+           [](const moe_birth& mb) {
+             return py::bytes(mb.weights_bytes());
+           })
+      .def_property_readonly("param_order", &moe_birth::param_order)
+      .def_property_readonly("step_count", &moe_birth::step_count)
+      .def_property_readonly("loss", &moe_birth::last_loss)
+      .def_property_readonly("nz", &moe_birth::nz_last);
 }
