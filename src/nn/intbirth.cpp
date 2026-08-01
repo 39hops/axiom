@@ -273,6 +273,9 @@ void rdiv_inplace(Mat& m, i64 d) {
 const char* const block::KEYS[11] = {"wq", "wk", "wv", "wo", "wg",
                                      "wu", "wd", "wh", "g1", "g2",
                                      "g3"};
+const char* const block::BODY_KEYS[9] = {"wq", "wk", "wv", "wo",
+                                         "wg", "wu", "wd", "g1",
+                                         "g2"};
 
 block::block(const std::string& tables_bytes, const contract& c)
     : c_(c) {
@@ -294,16 +297,25 @@ block::block(const std::string& tables_bytes, const contract& c)
     throw std::runtime_error("intbirth: table size mismatch");
 }
 
-void block::check_weights(const std::map<std::string, Mat>& w) const {
-  const auto sh = shapes(c_);
-  for (const char* k : KEYS) {
-    const auto it = w.find(k);
+namespace {
+void check_keys(const contract& c, const std::map<std::string, Mat>& w,
+                const char* const* keys, int n) {
+  const auto sh = shapes(c);
+  for (int i = 0; i < n; i++) {
+    const auto it = w.find(keys[i]);
     if (it == w.end())
-      throw std::runtime_error(std::string("intbirth: missing ") + k);
-    const auto s = sh.at(k);
+      throw std::runtime_error(std::string("intbirth: missing ") +
+                               keys[i]);
+    const auto s = sh.at(keys[i]);
     if (i64(it->second.size()) != i64(s.r) * s.c)
-      throw std::runtime_error(std::string("intbirth: bad shape ") + k);
+      throw std::runtime_error(std::string("intbirth: bad shape ") +
+                               keys[i]);
   }
+}
+}  // namespace
+
+void block::check_weights(const std::map<std::string, Mat>& w) const {
+  check_keys(c_, w, KEYS, 11);
 }
 
 Mat block::softmax_rows(const Mat& s, int rows, int C,
@@ -327,10 +339,57 @@ Mat block::softmax_rows(const Mat& s, int rows, int C,
   return p;
 }
 
-Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
-               block_cache& c) const {
-  check_weights(w);
-  const int T = c_.T, D = c_.D, DH = c_.DH, F = c_.F, V = c_.V;
+Mat block::rms_fwd(const Mat& xx, const Mat& g, Mat& isq) const {
+  const int T = c_.T, D = c_.D;
+  if (i64(xx.size()) != i64(T) * D || i64(g.size()) != D)
+    throw std::runtime_error("intbirth: rms_fwd shape");
+  Mat y(std::size_t(T) * D);
+  isq.assign(T, 0);
+  for (int t = 0; t < T; t++) {
+    i64 s2 = 0;
+    for (int d = 0; d < D; d++) {
+      const i64 v = xx[std::size_t(t) * D + d];
+      s2 += v * v;
+    }
+    const i64 m40 = (s2 / D) * (i64(1) << 32) / (Q * Q) + c_.eps32;
+    isq[t] = isqrt_newton(m40);
+    for (int d = 0; d < D; d++)
+      y[std::size_t(t) * D + d] =
+          rdiv(rdiv(xx[std::size_t(t) * D + d] * g[d], Q) * R16,
+               isq[t]);
+  }
+  return y;
+}
+
+Mat block::rms_bwd(const Mat& dy, const Mat& xx, const Mat& g,
+                   const Mat& isq, Mat& dg) const {
+  const int T = c_.T, D = c_.D;
+  Mat dx(std::size_t(T) * D);
+  dg.assign(D, 0);
+  Mat tv(D);
+  for (int t = 0; t < T; t++) {
+    i64 inner = 0;
+    for (int d = 0; d < D; d++) {
+      tv[d] = rdiv(g[d] * dy[std::size_t(t) * D + d], Q);
+      inner += rdiv(tv[d] * xx[std::size_t(t) * D + d], Q);
+    }
+    for (int d = 0; d < D; d++) {
+      const i64 xv = xx[std::size_t(t) * D + d];
+      const i64 term1 = rdiv(tv[d] * R16, isq[t]);
+      i64 cc = rdiv(xv * inner, i64(D) * Q);
+      for (int r = 0; r < 3; r++) cc = rdiv(cc * R16, isq[t]);
+      dx[std::size_t(t) * D + d] = term1 - cc;
+      dg[d] += rdiv(rdiv(dy[std::size_t(t) * D + d] * xv, Q) * R16,
+                    isq[t]);
+    }
+  }
+  return dx;
+}
+
+Mat block::body_fwd(const std::map<std::string, Mat>& w, const Mat& x,
+                    block_cache& c) const {
+  check_keys(c_, w, BODY_KEYS, 9);
+  const int T = c_.T, D = c_.D, DH = c_.DH, F = c_.F;
   const i64 PQ = c_.pq, CL = c_.act_clamp;
   if (i64(x.size()) != i64(T) * D)
     throw std::runtime_error("intbirth: bad x shape");
@@ -351,27 +410,9 @@ Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
       }
     return y;
   };
-  const auto rms_f = [&](const Mat& xx, const Mat& g, Mat& isq) {
-    Mat y(std::size_t(T) * D);
-    isq.assign(T, 0);
-    for (int t = 0; t < T; t++) {
-      i64 s2 = 0;
-      for (int d = 0; d < D; d++) {
-        const i64 v = xx[std::size_t(t) * D + d];
-        s2 += v * v;
-      }
-      const i64 m40 = (s2 / D) * (i64(1) << 32) / (Q * Q) + c_.eps32;
-      isq[t] = isqrt_newton(m40);
-      for (int d = 0; d < D; d++)
-        y[std::size_t(t) * D + d] =
-            rdiv(rdiv(xx[std::size_t(t) * D + d] * g[d], Q) * R16,
-                 isq[t]);
-    }
-    return y;
-  };
 
   c.x = x;
-  c.h1 = rms_f(x, w.at("g1"), c.i1);
+  c.h1 = rms_fwd(x, w.at("g1"), c.i1);
   c.q0 = int_gemm(c.h1, T, D, w.at("wq"), DH);
   c.k0 = int_gemm(c.h1, T, D, w.at("wk"), DH);
   c.v0 = int_gemm(c.h1, T, D, w.at("wv"), DH);
@@ -397,7 +438,7 @@ Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
     c.m1[i] = (pre1[i] <= CL && pre1[i] >= -CL);
     c.x1[i] = clampi(pre1[i], -CL, CL);
   }
-  c.h2 = rms_f(c.x1, w.at("g2"), c.i2);
+  c.h2 = rms_fwd(c.x1, w.at("g2"), c.i2);
   c.gp = int_gemm(c.h2, T, D, w.at("wg"), F);
   c.u = int_gemm(c.h2, T, D, w.at("wu"), F);
   rdiv_inplace(c.gp, Q);
@@ -418,20 +459,27 @@ Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
     c.m2[i] = (pre2[i] <= CL && pre2[i] >= -CL);
     c.x2[i] = clampi(pre2[i], -CL, CL);
   }
-  c.h3 = rms_f(c.x2, w.at("g3"), c.i3);
-  Mat logits = int_gemm(c.h3, T, D, w.at("wh"), V);
+  return c.x2;
+}
+
+Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
+               block_cache& c) const {
+  check_weights(w);
+  const Mat x2 = body_fwd(w, x, c);
+  c.h3 = rms_fwd(x2, w.at("g3"), c.i3);
+  Mat logits = int_gemm(c.h3, c_.T, c_.D, w.at("wh"), c_.V);
   rdiv_inplace(logits, Q);
   return logits;
 }
 
-std::map<std::string, Mat> block::bwd(
-    const std::map<std::string, Mat>& w, const Mat& dlogits,
+std::map<std::string, Mat> block::body_bwd(
+    const std::map<std::string, Mat>& w, const Mat& dxin,
     const block_cache& c, Mat* dx0_out) const {
-  check_weights(w);
-  const int T = c_.T, D = c_.D, DH = c_.DH, F = c_.F, V = c_.V;
+  check_keys(c_, w, BODY_KEYS, 9);
+  const int T = c_.T, D = c_.D, DH = c_.DH, F = c_.F;
   const i64 PQ = c_.pq;
-  if (i64(dlogits.size()) != i64(T) * V)
-    throw std::runtime_error("intbirth: bad dlogits shape");
+  if (i64(dxin.size()) != i64(T) * D)
+    throw std::runtime_error("intbirth: bad dxin shape");
   const Mat& dsl = tab_.at("dsilu.tab");
   const Mat& tcos = tab_.at("rope.cos");
   const Mat& tsin = tab_.at("rope.sin");
@@ -452,34 +500,11 @@ std::map<std::string, Mat> block::bwd(
   };
   const auto rms_b = [&](const Mat& dy, const Mat& xx, const Mat& g,
                          const Mat& isq, Mat& dg) {
-    Mat dx(std::size_t(T) * D);
-    dg.assign(D, 0);
-    Mat tv(D);
-    for (int t = 0; t < T; t++) {
-      i64 inner = 0;
-      for (int d = 0; d < D; d++) {
-        tv[d] = rdiv(g[d] * dy[std::size_t(t) * D + d], Q);
-        inner += rdiv(tv[d] * xx[std::size_t(t) * D + d], Q);
-      }
-      for (int d = 0; d < D; d++) {
-        const i64 xv = xx[std::size_t(t) * D + d];
-        const i64 term1 = rdiv(tv[d] * R16, isq[t]);
-        i64 cc = rdiv(xv * inner, i64(D) * Q);
-        for (int r = 0; r < 3; r++) cc = rdiv(cc * R16, isq[t]);
-        dx[std::size_t(t) * D + d] = term1 - cc;
-        dg[d] += rdiv(rdiv(dy[std::size_t(t) * D + d] * xv, Q) * R16,
-                      isq[t]);
-      }
-    }
-    return dx;
+    return rms_bwd(dy, xx, g, isq, dg);
   };
 
   std::map<std::string, Mat> G;
-  G["wh"] = int_gemm_xty(dlogits, T, V, c.h3, D);
-  rdiv_inplace(G["wh"], Q);
-  Mat dh3 = int_gemm_nt(dlogits, T, V, w.at("wh"), D);
-  rdiv_inplace(dh3, Q);
-  Mat dx2 = rms_b(dh3, c.x2, w.at("g3"), c.i3, G["g3"]);
+  Mat dx2 = dxin;
   for (std::size_t i = 0; i < dx2.size(); i++) dx2[i] *= c.m2[i];
   Mat df = int_gemm_nt(dx2, T, D, w.at("wd"), F);
   rdiv_inplace(df, Q);
@@ -552,6 +577,24 @@ std::map<std::string, Mat> block::bwd(
     for (std::size_t i = 0; i < dx0.size(); i++) dx0[i] += dx1[i];
     *dx0_out = std::move(dx0);
   }
+  return G;
+}
+
+std::map<std::string, Mat> block::bwd(
+    const std::map<std::string, Mat>& w, const Mat& dlogits,
+    const block_cache& c, Mat* dx0_out) const {
+  check_weights(w);
+  const int T = c_.T, D = c_.D, V = c_.V;
+  if (i64(dlogits.size()) != i64(T) * V)
+    throw std::runtime_error("intbirth: bad dlogits shape");
+  std::map<std::string, Mat> G;
+  G["wh"] = int_gemm_xty(dlogits, T, V, c.h3, D);
+  rdiv_inplace(G["wh"], Q);
+  Mat dh3 = int_gemm_nt(dlogits, T, V, w.at("wh"), D);
+  rdiv_inplace(dh3, Q);
+  const Mat dx2in = rms_bwd(dh3, c.x2, w.at("g3"), c.i3, G["g3"]);
+  auto Gb = body_bwd(w, dx2in, c, dx0_out);
+  for (auto& [k, g] : Gb) G[k] = std::move(g);
   return G;
 }
 
@@ -696,6 +739,156 @@ void full_birth::step_once() {
     for (auto& v : g) v = rdiv(v, Q * c.gboost);  // unboost
     unboosted.push_back(std::move(g));
     params.push_back(&w_.at(k));
+  }
+  std::vector<const Mat*> gp;
+  for (const auto& g : unboosted) gp.push_back(&g);
+  opt_.step(params, gp);
+  step_ += 1;
+}
+
+// ------------------------------------------------------ multi_birth
+
+multi_birth::multi_birth(const std::string& tables_bytes,
+                         const std::string& init_bytes,
+                         const contract& c)
+    : blk_(tables_bytes, c), opt_(c.shift, c.lrn, c.lrd) {
+  if (c.n_blocks < 1)
+    throw std::runtime_error("intbirth: n_blocks < 1");
+  const auto sh = shapes(c);
+  order_.push_back("emb");
+  for (int b = 0; b < c.n_blocks; b++)
+    for (const char* k : block::BODY_KEYS)
+      order_.push_back("b" + std::to_string(b) + "." + k);
+  order_.push_back("g_f");
+  const auto numel = [&](const std::string& name) -> std::size_t {
+    if (name == "emb") return std::size_t(c.V) * c.D;
+    if (name == "g_f") return std::size_t(c.D);
+    const auto s = sh.at(name.substr(name.find('.') + 1));
+    return std::size_t(s.r) * s.c;
+  };
+  std::size_t off = 0;
+  const auto take = [&](std::size_t n) {
+    if (off + n * 8 > init_bytes.size())
+      throw std::runtime_error("intbirth: truncated init");
+    Mat m(n);
+    std::memcpy(m.data(), init_bytes.data() + off, n * 8);
+    off += n * 8;
+    return m;
+  };
+  for (const auto& name : order_) w_[name] = take(numel(name));
+  tok_ = take(std::size_t(c.T));
+  tgt_ = take(std::size_t(c.T));
+  if (off != init_bytes.size())
+    throw std::runtime_error("intbirth: trailing init bytes");
+  for (const i64 t : tok_)
+    if (t < 0 || t >= c.V)
+      throw std::runtime_error("intbirth: token out of vocab");
+  for (const i64 t : tgt_)
+    if (t < 0 || t >= c.V)
+      throw std::runtime_error("intbirth: target out of vocab");
+  for (const auto& name : order_)
+    for (auto& v : w_[name]) v <<= c.shift;  // lift to Q_w
+}
+
+void multi_birth::run(int steps) {
+  for (int i = 0; i < steps; i++) step_once();
+}
+
+std::string multi_birth::mark() {
+  for (const auto& name : order_)
+    th_.update(w_.at(name).data(), w_.at(name).size() * 8);
+  return traj_sha();
+}
+
+std::string multi_birth::traj_sha() const {
+  detail::sha256 peek = th_;
+  return peek.hex();
+}
+
+std::string multi_birth::weights_bytes() const {
+  std::string out;
+  for (const auto& name : order_) {
+    const auto& w = w_.at(name);
+    out.append(reinterpret_cast<const char*>(w.data()), w.size() * 8);
+  }
+  return out;
+}
+
+void multi_birth::step_once() {
+  const contract& c = blk_.cfg();
+  const int T = c.T, D = c.D, V = c.V, NB = c.n_blocks;
+  // Q-scale view of the wide params (the matmul boundary)
+  std::map<std::string, Mat> nar;
+  for (const auto& name : order_) {
+    nar[name] = w_.at(name);
+    for (auto& v : nar[name]) v = rdiv(v, i64(1) << c.shift);
+  }
+  const Mat& emb = nar.at("emb");
+  // per-block weight views (BODY_KEYS names)
+  std::vector<std::map<std::string, Mat>> bw(NB);
+  for (int b = 0; b < NB; b++)
+    for (const char* k : block::BODY_KEYS)
+      bw[b][k] = nar.at("b" + std::to_string(b) + "." + k);
+
+  // ---- forward: emb lookup -> bodies -> final norm -> tied head
+  Mat x(std::size_t(T) * D);
+  for (int t = 0; t < T; t++)
+    for (int d = 0; d < D; d++)
+      x[std::size_t(t) * D + d] = emb[std::size_t(tok_[t]) * D + d];
+  std::vector<block_cache> bc(NB);
+  for (int b = 0; b < NB; b++) x = blk_.body_fwd(bw[b], x, bc[b]);
+  Mat i_f;
+  const Mat xf = x;
+  const Mat hf = blk_.rms_fwd(xf, nar.at("g_f"), i_f);
+  Mat logits = int_gemm(hf, T, D, emb, V);  // tied head
+  rdiv_inplace(logits, Q);
+
+  // ---- loss + CE gradient (boosted)
+  const Mat pp = blk_.softmax_rows(logits, T, V, Q);
+  i64 loss = 0;
+  for (int t = 0; t < T; t++)
+    loss += Q - pp[std::size_t(t) * V + tgt_[t]];
+  loss_ = loss;
+  Mat dlogits(std::size_t(T) * V);
+  for (int t = 0; t < T; t++)
+    for (int vv = 0; vv < V; vv++)
+      dlogits[std::size_t(t) * V + vv] =
+          (pp[std::size_t(t) * V + vv] - Q * (tgt_[t] == vv)) *
+          c.gboost;
+
+  // ---- backward
+  std::map<std::string, Mat> G;
+  // tied head: wh-convention grad wrt emb + dh into the norm
+  Mat g_head = int_gemm_xty(dlogits, T, V, hf, D);
+  rdiv_inplace(g_head, Q);
+  Mat dhf = int_gemm_nt(dlogits, T, V, emb, D);
+  rdiv_inplace(dhf, Q);
+  Mat dx = blk_.rms_bwd(dhf, xf, nar.at("g_f"), i_f, G["g_f"]);
+  for (int b = NB - 1; b >= 0; b--) {
+    Mat dx0;
+    auto Gb = blk_.body_bwd(bw[b], dx, bc[b], &dx0);
+    for (const char* k : block::BODY_KEYS)
+      G["b" + std::to_string(b) + "." + k] = std::move(Gb.at(k));
+    dx = std::move(dx0);
+  }
+  // embedding: EXACT scatter-add of dx rows by token, summed with
+  // the already-rounded head part (each part finalized BEFORE the
+  // sum — the rdiv-grouping rule)
+  Mat g_emb = std::move(g_head);
+  for (int t = 0; t < T; t++)
+    for (int d = 0; d < D; d++)
+      g_emb[std::size_t(tok_[t]) * D + d] += dx[std::size_t(t) * D + d];
+  G["emb"] = std::move(g_emb);
+
+  // ---- optimizer over param_order
+  std::vector<Mat*> params;
+  std::vector<Mat> unboosted;
+  unboosted.reserve(order_.size());
+  for (const auto& name : order_) {
+    Mat g = std::move(G.at(name));
+    for (auto& v : g) v = rdiv(v, Q * c.gboost);  // unboost
+    unboosted.push_back(std::move(g));
+    params.push_back(&w_.at(name));
   }
   std::vector<const Mat*> gp;
   for (const auto& g : unboosted) gp.push_back(&g);
