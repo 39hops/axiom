@@ -62,8 +62,16 @@ for arm in arms:
     m = intbirth.MoeBirth(tables, init, c, windows_bytes=win)
     assert list(m.param_order) == contract["param_order"], \
         f"{arm}: param_order DISAGREE - refusing"
-    m.run(steps)
-    sha = m.mark()
+    # digest rolls at step % max(125, STEPS//8) == 0 (relay -6)
+    interval = max(125, steps // 8)
+    done = 0
+    sha = None
+    while done < steps:
+        n = min(interval, steps - done)
+        m.run(n)
+        done += n
+        if done % interval == 0 or done == steps:
+            sha = m.mark()
     good = sha == env["final_sha"]
     ok &= good
     print(f"{arm}: steps {steps} loss {m.loss} nz {m.nz:.3f} "
