@@ -588,18 +588,20 @@ std::map<std::string, Mat> block::moe_body_bwd(
   Mat dx2 = dxin;
   for (std::size_t i = 0; i < dx2.size(); i++) dx2[i] *= c.m2[i];
 
-  // gate chain: d(out) = rdiv(dx2 * top_p, PQ);
-  // d(top_p)[t] = rdiv(sum_d out[t,d]*dx2[t,d], PQ)
-  Mat dout(std::size_t(T) * D);
+  // gate chain (relay 2026-08-01-6 pinned text): dgate = dx2*top_p
+  // kept EXACT (PQ-scaled, NO rounding at the gate); every consumer
+  // folds the /PQ into its own single rdiv (PQ*Q). d(top_p)[t] =
+  // rdiv(sum_d out[t,d]*dx2[t,d], Q) — /Q, the attention convention.
+  Mat dgate(std::size_t(T) * D);
   Mat dtp(T);
   for (int t = 0; t < T; t++) {
     i64 acc = 0;
     for (int d = 0; d < D; d++) {
       const std::size_t i = std::size_t(t) * D + d;
-      dout[i] = rdiv(dx2[i] * c.top_p[t], PQ);
+      dgate[i] = dx2[i] * c.top_p[t];
       acc += c.eout[i] * dx2[i];
     }
-    dtp[t] = rdiv(acc, PQ);
+    dtp[t] = rdiv(acc, Q);
   }
 
   // expert FFN backward per row; dW accumulated RAW per expert,
@@ -624,9 +626,9 @@ std::map<std::string, Mat> block::moe_body_bwd(
     for (int f = 0; f < F; f++) {
       i64 acc = 0;
       for (int d = 0; d < D; d++)
-        acc += dout[std::size_t(t) * D + d] *
+        acc += dgate[std::size_t(t) * D + d] *
                wd[std::size_t(d) * F + f];
-      df[f] = rdiv(acc, Q);
+      df[f] = rdiv(acc, PQ * Q);  // fold the gate /PQ here
       const i64 z = c.egp[std::size_t(t) * F + f];
       const i64 dsv = z > ts_ ? Q : z < -ts_ ? 0 : dsl[z + ts_];
       du[f] = rdiv(c.esg[std::size_t(t) * F + f] * df[f], Q);
@@ -643,7 +645,7 @@ std::map<std::string, Mat> block::moe_body_bwd(
     for (int d = 0; d < D; d++)
       for (int f = 0; f < F; f++)
         Gwd[std::size_t(d) * F + f] +=
-            dout[std::size_t(t) * D + d] *
+            dgate[std::size_t(t) * D + d] *
             c.ef[std::size_t(t) * F + f];
     // dh2 from expert weights (two-term sum, one rdiv after loop)
     for (int d = 0; d < D; d++) {
@@ -658,7 +660,7 @@ std::map<std::string, Mat> block::moe_body_bwd(
     const std::string p = "e" + std::to_string(e);
     rdiv_inplace(G.at(p + ".wg"), Q);
     rdiv_inplace(G.at(p + ".wu"), Q);
-    rdiv_inplace(G.at(p + ".wd"), Q);
+    rdiv_inplace(G.at(p + ".wd"), PQ * Q);  // dgate carries the PQ
   }
   rdiv_inplace(dh2, Q);
 
