@@ -115,6 +115,20 @@ class block {
   static const char* const BODY_KEYS[9];
 
  private:
+  // Body halves (gravmoe seam): body = ffn ∘ attn; the MoE body
+  // swaps only the ffn half. Residual adds + clamp masks stay in
+  // the composing caller so rounding placement is unchanged.
+  Mat attn_fwd(const std::map<std::string, Mat>& w, const Mat& x,
+               block_cache& c) const;
+  Mat ffn_fwd(const std::map<std::string, Mat>& w, const Mat& x1,
+              block_cache& c) const;
+  Mat ffn_bwd(const std::map<std::string, Mat>& w,
+              const Mat& dx2_masked, const block_cache& c,
+              std::map<std::string, Mat>& G) const;
+  Mat attn_bwd(const std::map<std::string, Mat>& w,
+               const Mat& dx1_masked, const block_cache& c,
+               std::map<std::string, Mat>& G) const;
+
   contract c_;
   i64 scale_ = 0, ts_ = 0, tse_ = 0;
   std::map<std::string, Mat> tab_;

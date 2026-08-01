@@ -386,14 +386,12 @@ Mat block::rms_bwd(const Mat& dy, const Mat& xx, const Mat& g,
   return dx;
 }
 
-Mat block::body_fwd(const std::map<std::string, Mat>& w, const Mat& x,
+Mat block::attn_fwd(const std::map<std::string, Mat>& w, const Mat& x,
                     block_cache& c) const {
-  check_keys(c_, w, BODY_KEYS, 9);
-  const int T = c_.T, D = c_.D, DH = c_.DH, F = c_.F;
+  const int T = c_.T, D = c_.D, DH = c_.DH;
   const i64 PQ = c_.pq, CL = c_.act_clamp;
   if (i64(x.size()) != i64(T) * D)
     throw std::runtime_error("intbirth: bad x shape");
-  const Mat& sil = tab_.at("silu.tab");
   const Mat& tcos = tab_.at("rope.cos");
   const Mat& tsin = tab_.at("rope.sin");
   const int half = DH / 2;
@@ -438,6 +436,15 @@ Mat block::body_fwd(const std::map<std::string, Mat>& w, const Mat& x,
     c.m1[i] = (pre1[i] <= CL && pre1[i] >= -CL);
     c.x1[i] = clampi(pre1[i], -CL, CL);
   }
+  return c.x1;
+}
+
+Mat block::ffn_fwd(const std::map<std::string, Mat>& w, const Mat& x1,
+                   block_cache& c) const {
+  const int T = c_.T, D = c_.D, F = c_.F;
+  const i64 CL = c_.act_clamp;
+  const Mat& sil = tab_.at("silu.tab");
+  (void)x1;  // residual base read from c.x1 (== x1)
   c.h2 = rms_fwd(c.x1, w.at("g2"), c.i2);
   c.gp = int_gemm(c.h2, T, D, w.at("wg"), F);
   c.u = int_gemm(c.h2, T, D, w.at("wu"), F);
@@ -462,6 +469,12 @@ Mat block::body_fwd(const std::map<std::string, Mat>& w, const Mat& x,
   return c.x2;
 }
 
+Mat block::body_fwd(const std::map<std::string, Mat>& w, const Mat& x,
+                    block_cache& c) const {
+  check_keys(c_, w, BODY_KEYS, 9);
+  return ffn_fwd(w, attn_fwd(w, x, c), c);
+}
+
 Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
                block_cache& c) const {
   check_weights(w);
@@ -472,40 +485,12 @@ Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
   return logits;
 }
 
-std::map<std::string, Mat> block::body_bwd(
-    const std::map<std::string, Mat>& w, const Mat& dxin,
-    const block_cache& c, Mat* dx0_out) const {
-  check_keys(c_, w, BODY_KEYS, 9);
-  const int T = c_.T, D = c_.D, DH = c_.DH, F = c_.F;
-  const i64 PQ = c_.pq;
-  if (i64(dxin.size()) != i64(T) * D)
-    throw std::runtime_error("intbirth: bad dxin shape");
+Mat block::ffn_bwd(const std::map<std::string, Mat>& w,
+                   const Mat& dx2_masked, const block_cache& c,
+                   std::map<std::string, Mat>& G) const {
+  const int T = c_.T, D = c_.D, F = c_.F;
   const Mat& dsl = tab_.at("dsilu.tab");
-  const Mat& tcos = tab_.at("rope.cos");
-  const Mat& tsin = tab_.at("rope.sin");
-  const int half = DH / 2;
-  const auto rope_b = [&](const Mat& dx) {
-    Mat y(std::size_t(T) * DH);
-    for (int t = 0; t < T; t++)
-      for (int i = 0; i < half; i++) {
-        const i64 co = tcos[std::size_t(t) * half + i];
-        const i64 si = tsin[std::size_t(t) * half + i];
-        const i64 a = dx[std::size_t(t) * DH + i];
-        const i64 b = dx[std::size_t(t) * DH + half + i];
-        y[std::size_t(t) * DH + i] = rdiv(a * co + b * si, RS);
-        y[std::size_t(t) * DH + half + i] =
-            rdiv(-a * si + b * co, RS);
-      }
-    return y;
-  };
-  const auto rms_b = [&](const Mat& dy, const Mat& xx, const Mat& g,
-                         const Mat& isq, Mat& dg) {
-    return rms_bwd(dy, xx, g, isq, dg);
-  };
-
-  std::map<std::string, Mat> G;
-  Mat dx2 = dxin;
-  for (std::size_t i = 0; i < dx2.size(); i++) dx2[i] *= c.m2[i];
+  const Mat& dx2 = dx2_masked;
   Mat df = int_gemm_nt(dx2, T, D, w.at("wd"), F);
   rdiv_inplace(df, Q);
   G["wd"] = int_gemm_xty(dx2, T, D, c.f, F);
@@ -527,9 +512,32 @@ std::map<std::string, Mat> block::body_bwd(
   rdiv_inplace(G["wu"], Q);
   G["wg"] = int_gemm_xty(dgp, T, F, c.h2, D);
   rdiv_inplace(G["wg"], Q);
-  Mat dx1 = rms_b(dh2, c.x1, w.at("g2"), c.i2, G["g2"]);
-  for (std::size_t i = 0; i < dx1.size(); i++)
-    dx1[i] = (dx1[i] + dx2[i]) * c.m1[i];
+  return rms_bwd(dh2, c.x1, w.at("g2"), c.i2, G["g2"]);
+}
+
+Mat block::attn_bwd(const std::map<std::string, Mat>& w,
+                    const Mat& dx1_masked, const block_cache& c,
+                    std::map<std::string, Mat>& G) const {
+  const int T = c_.T, D = c_.D, DH = c_.DH;
+  const i64 PQ = c_.pq;
+  const Mat& dx1 = dx1_masked;
+  const Mat& tcos = tab_.at("rope.cos");
+  const Mat& tsin = tab_.at("rope.sin");
+  const int half = DH / 2;
+  const auto rope_b = [&](const Mat& dx) {
+    Mat y(std::size_t(T) * DH);
+    for (int t = 0; t < T; t++)
+      for (int i = 0; i < half; i++) {
+        const i64 co = tcos[std::size_t(t) * half + i];
+        const i64 si = tsin[std::size_t(t) * half + i];
+        const i64 a = dx[std::size_t(t) * DH + i];
+        const i64 b = dx[std::size_t(t) * DH + half + i];
+        y[std::size_t(t) * DH + i] = rdiv(a * co + b * si, RS);
+        y[std::size_t(t) * DH + half + i] =
+            rdiv(-a * si + b * co, RS);
+      }
+    return y;
+  };
   Mat da = int_gemm_nt(dx1, T, D, w.at("wo"), DH);
   rdiv_inplace(da, Q);
   G["wo"] = int_gemm_xty(dx1, T, D, c.a, DH);
@@ -570,7 +578,22 @@ std::map<std::string, Mat> block::body_bwd(
       dh1[i] += t2[i] + t3[i];
   }
   rdiv_inplace(dh1, Q);  // one rdiv after the three-term sum
-  Mat dx0 = rms_b(dh1, c.x, w.at("g1"), c.i1, G["g1"]);
+  return rms_bwd(dh1, c.x, w.at("g1"), c.i1, G["g1"]);
+}
+
+std::map<std::string, Mat> block::body_bwd(
+    const std::map<std::string, Mat>& w, const Mat& dxin,
+    const block_cache& c, Mat* dx0_out) const {
+  check_keys(c_, w, BODY_KEYS, 9);
+  if (i64(dxin.size()) != i64(c_.T) * c_.D)
+    throw std::runtime_error("intbirth: bad dxin shape");
+  std::map<std::string, Mat> G;
+  Mat dx2 = dxin;
+  for (std::size_t i = 0; i < dx2.size(); i++) dx2[i] *= c.m2[i];
+  Mat dx1 = ffn_bwd(w, dx2, c, G);
+  for (std::size_t i = 0; i < dx1.size(); i++)
+    dx1[i] = (dx1[i] + dx2[i]) * c.m1[i];
+  Mat dx0 = attn_bwd(w, dx1, c, G);
   if (dx0_out) {
     // residual to input: the multi-block chain point (dx1 already
     // carries the clamp mask)
