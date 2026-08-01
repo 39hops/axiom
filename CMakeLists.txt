@@ -41,6 +41,7 @@ add_library(axiom STATIC
   src/sym/risch.cpp
   src/nn/model.cpp
   src/nn/exact.cpp
+  src/nn/intbirth.cpp
   src/search/verify.cpp
   src/search/successors.cpp
   src/search/beam.cpp
@@ -86,6 +87,8 @@ if(AXIOM_BUILD_PYTHON)
   find_package(pybind11 CONFIG REQUIRED)
   pybind11_add_module(axiom_sym bindings/axiom_sym.cpp)
   target_link_libraries(axiom_sym PRIVATE axiom)
+  pybind11_add_module(intbirth bindings/intbirth.cpp)
+  target_link_libraries(intbirth PRIVATE axiom)
 endif()
 
 option(AXIOM_BUILD_TESTS "Build tests" ON)
