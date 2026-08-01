@@ -60,6 +60,7 @@ void rdiv_inplace(Mat& m, i64 d);
     rounding of Q*sqrt(DH), computed with exact isqrt). */
 struct contract {
   int T = 32, D = 64, DH = 16, F = 128, V = 64;
+  int n_blocks = 1;           // multi-block anatomy (mb spec)
   int shift = 12;             // Q_w = Q << shift
   i64 gboost = 256;           // backward boost (unboost at optimizer)
   i64 pq = 8192;              // attention-prob carry scale
@@ -95,7 +96,23 @@ class block {
   /** Validate a weight map against the contract shapes. */
   void check_weights(const std::map<std::string, Mat>& w) const;
 
+  // ---- Body layer (mb spec): the Block minus g3/wh, chainable.
+  /** x -> x2 (post-clamp); 9-param weight map (BODY_KEYS). */
+  Mat body_fwd(const std::map<std::string, Mat>& w, const Mat& x,
+               block_cache& cache) const;
+  /** dxin = grad wrt this body's OUTPUT x2 (post-clamp; first op
+      is the m2 clamp mask). Returns the 9 body grads; *dx0_out
+      gets the residual-chained input grad. */
+  std::map<std::string, Mat> body_bwd(
+      const std::map<std::string, Mat>& w, const Mat& dxin,
+      const block_cache& cache, Mat* dx0_out) const;
+  /** rmsnorm fwd/bwd over [T, D] (the mb head norm needs them). */
+  Mat rms_fwd(const Mat& x, const Mat& g, Mat& isq_out) const;
+  Mat rms_bwd(const Mat& dy, const Mat& x, const Mat& g,
+              const Mat& isq, Mat& dg_out) const;
+
   static const char* const KEYS[11];
+  static const char* const BODY_KEYS[9];
 
  private:
   contract c_;
@@ -155,6 +172,38 @@ class full_birth {
   i64 loss_ = 0;
   std::map<std::string, Mat> w_;   // wide, Q_w scale
   std::vector<i64> x_, tgt_;
+  detail::sha256 th_;
+};
+
+/** The multi-block composed loop (mb spec: emb -> Body x n_blocks
+    -> rmsnorm(g_f) -> TIED head; embedding grad = rounded head
+    part + exact scatter-add of dx0 by token). init_bytes: params
+    in mb_ref.json param_order (emb, b{i}.*, g_f), then tok [T],
+    then tgt [T], int64 LE. */
+class multi_birth {
+ public:
+  multi_birth(const std::string& tables_bytes,
+              const std::string& init_bytes, const contract& c);
+  void run(int steps);
+  int step_count() const { return step_; }
+  i64 last_loss() const { return loss_; }
+  double nz_last() const { return opt_.nz_last(); }
+  std::string mark();       ///< milestone protocol, param_order
+  std::string traj_sha() const;
+  std::string weights_bytes() const;  ///< wide, param_order, i64 LE
+  const std::vector<std::string>& param_order() const {
+    return order_;
+  }
+
+ private:
+  void step_once();
+  block blk_;
+  adamw opt_;
+  int step_ = 0;
+  i64 loss_ = 0;
+  std::vector<std::string> order_;
+  std::map<std::string, Mat> w_;   // wide, Q_w scale
+  std::vector<i64> tok_, tgt_;
   detail::sha256 th_;
 };
 

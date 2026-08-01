@@ -34,6 +34,7 @@ using ax::nn::ib::contract;
 using ax::nn::ib::full_birth;
 using ax::nn::ib::i64;
 using ax::nn::ib::Mat;
+using ax::nn::ib::multi_birth;
 
 namespace {
 
@@ -48,6 +49,7 @@ contract contract_from_dict(const py::dict& d) {
     return d.contains(k) ? d[k].cast<long long>() : dflt;
   };
   c.T = geti("T", c.T);
+  c.n_blocks = geti("n_blocks", c.n_blocks);
   c.D = geti("D", c.D);
   c.DH = geti("DH", c.DH);
   c.F = geti("F", c.F);
@@ -85,11 +87,8 @@ std::map<std::string, std::vector<py::ssize_t>> key_shapes(
 
 std::map<std::string, Mat> weights_from_dict(const py::dict& d) {
   std::map<std::string, Mat> w;
-  for (const char* k : block::KEYS) {
-    if (!d.contains(k))
-      throw std::runtime_error(std::string("missing weight ") + k);
-    w[k] = to_mat(d[k].cast<Arr>());
-  }
+  for (const auto& [k, v] : d)
+    w[k.cast<std::string>()] = to_mat(v.cast<Arr>());
   return w;
 }
 
@@ -191,6 +190,53 @@ PYBIND11_MODULE(intbirth, m) {
            py::arg("weights"), py::arg("dlogits"), py::arg("cache"),
            "(grads dict at boosted scale, dx0 [T,D] — the "
            "multi-block chain point)")
+      .def("body_fwd",
+           [](const block& b, const py::dict& w, const Arr& x) {
+             auto wm = weights_from_dict(w);
+             auto cache = new block_cache();
+             const Mat x2 = b.body_fwd(wm, to_mat(x), *cache);
+             return py::make_tuple(
+                 to_arr(x2, {b.cfg().T, b.cfg().D}),
+                 py::cast(cache,
+                          py::return_value_policy::take_ownership));
+           },
+           py::arg("weights"), py::arg("x"),
+           "(x2 [T,D], cache); Body layer — Block minus g3/wh "
+           "(BODY_KEYS), the mb chain unit")
+      .def("body_bwd",
+           [](const block& b, const py::dict& w, const Arr& dxin,
+              const block_cache& cache) {
+             auto wm = weights_from_dict(w);
+             Mat dx0;
+             auto G = b.body_bwd(wm, to_mat(dxin), cache, &dx0);
+             return py::make_tuple(
+                 grads_to_dict(G, b.cfg()),
+                 to_arr(dx0, {b.cfg().T, b.cfg().D}));
+           },
+           py::arg("weights"), py::arg("dxin"), py::arg("cache"),
+           "(grads dict, dx0); dxin = grad wrt the body OUTPUT x2 "
+           "(the m2 clamp mask is applied first, per the mb spec)")
+      .def("rms_fwd",
+           [](const block& b, const Arr& x, const Arr& g) {
+             Mat isq;
+             const Mat y = b.rms_fwd(to_mat(x), to_mat(g), isq);
+             return py::make_tuple(
+                 to_arr(y, {b.cfg().T, b.cfg().D}),
+                 to_arr(isq, {b.cfg().T}));
+           },
+           py::arg("x"), py::arg("g"), "(y [T,D], isq [T])")
+      .def("rms_bwd",
+           [](const block& b, const Arr& dy, const Arr& x,
+              const Arr& g, const Arr& isq) {
+             Mat dg;
+             const Mat dx =
+                 b.rms_bwd(to_mat(dy), to_mat(x), to_mat(g),
+                           to_mat(isq), dg);
+             return py::make_tuple(to_arr(dx, {b.cfg().T, b.cfg().D}),
+                                   to_arr(dg, {b.cfg().D}));
+           },
+           py::arg("dy"), py::arg("x"), py::arg("g"), py::arg("isq"),
+           "(dx [T,D], dg [D])")
       .def("softmax_rows",
            [](const block& b, const Arr& s, long long scale) {
              if (s.ndim() != 2)
@@ -253,4 +299,30 @@ PYBIND11_MODULE(intbirth, m) {
       .def_property_readonly("step_count", &full_birth::step_count)
       .def_property_readonly("loss", &full_birth::last_loss)
       .def_property_readonly("nz", &full_birth::nz_last);
+
+  py::class_<multi_birth>(m, "MultiBirth")
+      .def(py::init([](const py::bytes& tables, const py::bytes& init,
+                       const py::dict& c) {
+             return new multi_birth(std::string(tables),
+                                    std::string(init),
+                                    contract_from_dict(c));
+           }),
+           py::arg("tables_bytes"), py::arg("init_bytes"),
+           py::arg("contract"),
+           "the mb anatomy: emb -> Body x n_blocks -> rmsnorm(g_f) "
+           "-> tied head; init in mb_ref.json param_order + tok + "
+           "tgt")
+      .def("run", &multi_birth::run, py::arg("steps"),
+           py::call_guard<py::gil_scoped_release>())
+      .def("mark", &multi_birth::mark)
+      .def("traj_sha", &multi_birth::traj_sha)
+      .def("milestone_sha", &multi_birth::traj_sha)
+      .def("weights_bytes",
+           [](const multi_birth& mb) {
+             return py::bytes(mb.weights_bytes());
+           })
+      .def_property_readonly("param_order", &multi_birth::param_order)
+      .def_property_readonly("step_count", &multi_birth::step_count)
+      .def_property_readonly("loss", &multi_birth::last_loss)
+      .def_property_readonly("nz", &multi_birth::nz_last);
 }
