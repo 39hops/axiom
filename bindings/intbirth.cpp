@@ -50,6 +50,10 @@ contract contract_from_dict(const py::dict& d) {
   };
   c.T = geti("T", c.T);
   c.n_blocks = geti("n_blocks", c.n_blocks);
+  c.n_experts = geti("E", c.n_experts);
+  c.grav_k = getl("K", c.grav_k);
+  c.grav_ln = getl("LN", c.grav_ln);
+  c.grav_ld = getl("LD", c.grav_ld);
   c.D = geti("D", c.D);
   c.DH = geti("DH", c.DH);
   c.F = geti("F", c.F);
@@ -96,7 +100,17 @@ py::dict grads_to_dict(const std::map<std::string, Mat>& g,
                        const contract& c) {
   const auto sh = key_shapes(c);
   py::dict out;
-  for (const auto& [k, m] : g) out[k.c_str()] = to_arr(m, sh.at(k));
+  for (const auto& [k, m] : g) {
+    if (sh.count(k)) {
+      out[k.c_str()] = to_arr(m, sh.at(k));
+    } else if (k == "wr") {
+      out[k.c_str()] = to_arr(m, {c.n_experts, c.D});
+    } else {
+      // MoE expert names e{j}.wg/.wu/.wd — shape by the suffix
+      const std::string suf = k.substr(k.find('.') + 1);
+      out[k.c_str()] = to_arr(m, sh.at(suf));
+    }
+  }
   return out;
 }
 
@@ -216,6 +230,33 @@ PYBIND11_MODULE(intbirth, m) {
            py::arg("weights"), py::arg("dxin"), py::arg("cache"),
            "(grads dict, dx0); dxin = grad wrt the body OUTPUT x2 "
            "(the m2 clamp mask is applied first, per the mb spec)")
+      .def("moe_body_fwd",
+           [](const block& b, const py::dict& w, const Arr& x) {
+             auto wm = weights_from_dict(w);
+             auto cache = new block_cache();
+             const Mat x2 = b.moe_body_fwd(wm, to_mat(x), *cache);
+             return py::make_tuple(
+                 to_arr(x2, {b.cfg().T, b.cfg().D}),
+                 py::cast(cache,
+                          py::return_value_policy::take_ownership));
+           },
+           py::arg("weights"), py::arg("x"),
+           "(x2 [T,D], cache); MoE Body — attn half + top-1-routed "
+           "E-expert FFN with the fx3 gate (gravmoe spec). Weight "
+           "names: wq wk wv wo g1 g2, wr, e{j}.wg/.wu/.wd")
+      .def("moe_body_bwd",
+           [](const block& b, const py::dict& w, const Arr& dxin,
+              const block_cache& cache) {
+             auto wm = weights_from_dict(w);
+             Mat dx0;
+             auto G = b.moe_body_bwd(wm, to_mat(dxin), cache, &dx0);
+             return py::make_tuple(
+                 grads_to_dict(G, b.cfg()),
+                 to_arr(dx0, {b.cfg().T, b.cfg().D}));
+           },
+           py::arg("weights"), py::arg("dxin"), py::arg("cache"),
+           "(grads dict with MoE names, dx0); dxin = grad wrt the "
+           "body OUTPUT x2 (m2 clamp mask applied first)")
       .def("rms_fwd",
            [](const block& b, const Arr& x, const Arr& g) {
              Mat isq;
