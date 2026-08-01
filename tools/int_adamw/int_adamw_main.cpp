@@ -1,14 +1,17 @@
-// R2 C++ leg: IntAdamW + the integer FFN fwd/bwd mini-birth
-// (reference: llmopt scratch/detbwd_r2_adamw.py + detbwd_r1.py).
-// All state int64; the bias-correction rationals are exact big-int
-// per step, both sides right-shifted together until the numerator
-// fits 30 bits (the house construction). Init + tables consumed as
-// shipped bytes (r2_init.bin, AXP3) — never re-drawn.
-// PASS = the house trajectory sha 5f8dcdcc75acc0f4... and every
-// printed loss, identical.
+// R2/R3a C++ leg: IntAdamW + the integer FFN fwd/bwd mini-birth
+// (references: llmopt scratch/detbwd_r2_adamw.py, detbwd_r3_qw.py,
+// detbwd_r1.py). All state int64; bias-correction rationals are
+// exact big-int per step, both sides right-shifted together while
+// the numerator exceeds 2^30 (strict >, the corrected house spec).
+// R3a wide-accumulator contract: weights carried at Q_w = Q << S,
+// rdiv(w, 1 << S) at the matmul boundary, update applied at Q_w
+// via rdiv(LRN*mh*(Q<<S), LRD*den). R2 is the S=0 / lr=1/20 /
+// 200-step special case of the same loop. Init + tables consumed
+// as shipped bytes (r2_init.bin, AXP3) — never re-drawn.
 //
 // Build: c++ -O2 -std=c++17 int_adamw_main.cpp -o int_adamw
-// Run:   ./int_adamw r2_init.bin
+// Run:   ./int_adamw r2_init.bin          (R2, house sha 5f8dcdcc...)
+//        ./int_adamw r2_init.bin --r3a    (R3a shift sweep 0/4/8/12)
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -24,8 +27,8 @@ using u8 = uint8_t;
 
 static const i64 Q = 512, TS = 4096, EPS = 4;
 static const i64 B1N = 9, B1D = 10, B2N = 999, B2D = 1000;
-static const i64 LRN = 1, LRD = 20, WDN = 1, WDD = 100000;
-static const int D = 64, F = 256, T = 32, STEPS = 200, HASH_EVERY = 50;
+static const i64 WDN = 1, WDD = 100000;
+static const int D = 64, F = 256, T = 32;
 
 // ---------- sha256 (as FX-V2/V3) ----------
 struct Sha256 {
@@ -262,8 +265,12 @@ struct IntAdamW {
   std::vector<Mat*> p;
   std::vector<Mat> m, v;
   int t = 0;
+  int shift;      // weights at Q_w = Q << shift (R3a; R2 = 0)
+  i64 lrn, lrd;
+  i64 nz = 0, tot = 0;  // last step's nonzero-update stats
   Big p10, p9, p1000, p999;  // running B1D^t etc.
-  explicit IntAdamW(std::vector<Mat*> params) : p(std::move(params)) {
+  IntAdamW(std::vector<Mat*> params, int shift_, i64 lrn_, i64 lrd_)
+      : p(std::move(params)), shift(shift_), lrn(lrn_), lrd(lrd_) {
     for (auto* w : p) {
       m.emplace_back(w->size(), 0);
       v.emplace_back(w->size(), 0);
@@ -281,6 +288,7 @@ struct IntAdamW {
     i64 bc2n = n2.to_i64(), bc2d = d2.to_i64();
     if (bc1d < 1) bc1d = 1;
     if (bc2d < 1) bc2d = 1;
+    nz = tot = 0;
     for (size_t j = 0; j < p.size(); j++) {
       Mat& w = *p[j];
       for (size_t i = 0; i < w.size(); i++) {
@@ -291,7 +299,10 @@ struct IntAdamW {
         const i64 mh = rdiv(m[j][i] * bc1n, bc1d);
         const i64 vh = rdiv(v[j][i] * bc2n, bc2d);
         const i64 den = isqrt_newton(vh * Q) + EPS;
-        w[i] -= rdiv(LRN * mh * Q, LRD * den);
+        const i64 upd = rdiv(lrn * mh * (Q << shift), lrd * den);
+        nz += upd != 0;
+        tot += 1;
+        w[i] -= upd;
         w[i] -= rdiv(w[i] * WDN, WDD);
       }
     }
@@ -324,22 +335,29 @@ static std::map<std::string, Mat> load_axp3(const char* path) {
   return t;
 }
 
-int main(int argc, char** argv) {
-  if (argc != 2) { fprintf(stderr, "usage: %s r2_init.bin\n", argv[0]); return 1; }
-  auto tt = load_axp3(argv[1]);
+static void run(const std::map<std::string, Mat>& tt, int shift,
+                i64 lrn, i64 lrd, int steps, int hash_every,
+                bool r2_prints) {
   Tables tb{tt.at("silu.tab"), tt.at("dsilu.tab")};
-  Mat xq = tt.at("xq");
-  Mat tw[3] = {tt.at("tw0"), tt.at("tw1"), tt.at("tw2")};
-  Mat st[3] = {tt.at("s0"), tt.at("s1"), tt.at("s2")};
+  const Mat& xq = tt.at("xq");
   Cache c0;
-  Mat tgt = ffn_fwd(xq, tw[0], tw[1], tw[2], tb, c0);
-
-  IntAdamW opt({&st[0], &st[1], &st[2]});
+  Mat tgt = ffn_fwd(xq, tt.at("tw0"), tt.at("tw1"), tt.at("tw2"),
+                    tb, c0);
+  Mat st[3] = {tt.at("s0"), tt.at("s1"), tt.at("s2")};
+  for (auto& w : st)
+    for (auto& v : w) v <<= shift;  // carry weights at Q_w
+  IntAdamW opt({&st[0], &st[1], &st[2]}, shift, lrn, lrd);
   Sha256 h;
+  double nz_first = -1, nz_last = 0;
   i64 loss0 = 0, loss_mid = 0, loss_last = 0;
-  for (int step = 1; step <= STEPS; step++) {
+  for (int step = 1; step <= steps; step++) {
+    Mat wq[3];
+    for (int j = 0; j < 3; j++) {
+      wq[j] = st[j];
+      for (auto& v : wq[j]) v = rdiv(v, i64(1) << shift);
+    }
     Cache c;
-    Mat y = ffn_fwd(xq, st[0], st[1], st[2], tb, c);
+    Mat y = ffn_fwd(xq, wq[0], wq[1], wq[2], tb, c);
     Mat dy(y.size());
     i64 loss = 0;
     for (size_t i = 0; i < y.size(); i++) {
@@ -347,24 +365,49 @@ int main(int argc, char** argv) {
       loss += dy[i] * dy[i];
     }
     if (step == 1) loss0 = loss;
-    if (step == STEPS / 2 + 1) loss_mid = loss;  // losses[len//2]
+    if (step == steps / 2 + 1) loss_mid = loss;  // losses[len//2]
     loss_last = loss;
     std::vector<Mat> grads(3);
-    ffn_bwd(dy, xq, st[0], st[1], st[2], c, tb,
+    ffn_bwd(dy, xq, wq[0], wq[1], wq[2], c, tb,
             grads[0], grads[1], grads[2]);
     for (auto& g : grads)
       for (auto& v : g) v = rdiv(v, Q);  // Q^2 -> Q (loss boundary)
     opt.step(grads);
-    if (step % HASH_EVERY == 0) {
+    if (nz_first < 0) nz_first = double(opt.nz) / double(opt.tot);
+    nz_last = double(opt.nz) / double(opt.tot);
+    if (step % hash_every == 0) {
       for (const auto& w : st) h.update(w.data(), w.size() * 8);
-      Sha256 peek = h;  // running digest, as the reference prints
-      printf("[r2-cpp] step %d loss %lld traj-sha %.16s\n", step,
-             (long long)loss, peek.hex().c_str());
+      if (r2_prints) {
+        Sha256 peek = h;  // running digest, as the reference prints
+        printf("[r2-cpp] step %d loss %lld traj-sha %.16s\n", step,
+               (long long)loss, peek.hex().c_str());
+      }
     }
   }
-  printf("[r2-cpp] loss %lld -> %lld -> %lld monotone-ish: %s\n",
-         (long long)loss0, (long long)loss_mid, (long long)loss_last,
-         loss_last < loss_mid && loss_mid < loss0 ? "true" : "false");
-  printf("[r2-cpp] FINAL trajectory sha %s\n", h.hex().c_str());
+  if (r2_prints) {
+    printf("[r2-cpp] loss %lld -> %lld -> %lld monotone-ish: %s\n",
+           (long long)loss0, (long long)loss_mid, (long long)loss_last,
+           loss_last < loss_mid && loss_mid < loss0 ? "true" : "false");
+    printf("[r2-cpp] FINAL trajectory sha %s\n", h.hex().c_str());
+  } else {
+    printf("[r3a-cpp] SHIFT=%2d loss %.3e -> %.3e -> %.3e  "
+           "nz-upd first %.3f last %.3f  sha %s\n", shift,
+           double(loss0), double(loss_mid), double(loss_last),
+           nz_first, nz_last, h.hex().c_str());
+  }
+}
+
+int main(int argc, char** argv) {
+  if (argc < 2) {
+    fprintf(stderr, "usage: %s r2_init.bin [--r3a]\n", argv[0]);
+    return 1;
+  }
+  const auto tt = load_axp3(argv[1]);
+  if (argc > 2 && std::string(argv[2]) == "--r3a") {
+    printf("[r3a-cpp] lr 1/1000, 400 steps\n");
+    for (int s : {0, 4, 8, 12}) run(tt, s, 1, 1000, 400, 100, false);
+  } else {
+    run(tt, 0, 1, 20, 200, 50, true);
+  }
   return 0;
 }
