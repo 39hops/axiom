@@ -247,4 +247,41 @@ class multi_birth {
   detail::sha256 th_;
 };
 
+/** The gravmoe composed loop (relay 2026-08-01-5): the mb anatomy
+    with each Body's FFN grown to E experts (MoE Body), backward
+    boost GB = 4 x gboost, window cycling, and gravity events every
+    grav_k optimizer steps (wide Q_w space, per body, kinds wg/wu/wd,
+    experts in index order; mean finalized ONCE via one rdiv, then
+    each pull rounded: w_e += rdiv((mean - w_e)*LN, LD)).
+    param_order: emb, per body [wq wk wv wo g1 g2, wr,
+    e{j}.wg/.wu/.wd j ascending], g_f. init_bytes = params in
+    param_order (+ tok[T] ++ tgt[T] tail iff windows_bytes empty). */
+class moe_birth {
+ public:
+  moe_birth(const std::string& tables_bytes,
+            const std::string& init_bytes, const contract& c,
+            const std::string& windows_bytes = "");
+  void run(int steps);
+  int step_count() const { return step_; }
+  i64 last_loss() const { return loss_; }
+  double nz_last() const { return opt_.nz_last(); }
+  std::string mark();       ///< milestone protocol, param_order
+  std::string traj_sha() const;
+  std::string weights_bytes() const;  ///< wide, param_order, i64 LE
+  const std::vector<std::string>& param_order() const {
+    return order_;
+  }
+
+ private:
+  void step_once();
+  block blk_;
+  adamw opt_;
+  int step_ = 0;
+  i64 loss_ = 0;
+  std::vector<std::string> order_;
+  std::map<std::string, Mat> w_;   // wide, Q_w scale
+  std::vector<Mat> wtok_, wtgt_;   // NW windows; step i uses i % NW
+  detail::sha256 th_;
+};
+
 }  // namespace ax::nn::ib
