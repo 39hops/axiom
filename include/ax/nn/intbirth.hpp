@@ -193,11 +193,18 @@ class full_birth {
     -> rmsnorm(g_f) -> TIED head; embedding grad = rounded head
     part + exact scatter-add of dx0 by token). init_bytes: params
     in mb_ref.json param_order (emb, b{i}.*, g_f), then tok [T],
-    then tgt [T], int64 LE. */
+    then tgt [T], int64 LE.
+
+    Window cycling (gravmoe rung engine ask): when windows_bytes is
+    non-empty, init_bytes carries params ONLY and windows_bytes is
+    NW records of tok[T] ++ tgt[T] (int64 LE, NW inferred); step i
+    trains on window i mod NW. Empty windows_bytes = the certified
+    single-window layout, byte-identical trajectory. */
 class multi_birth {
  public:
   multi_birth(const std::string& tables_bytes,
-              const std::string& init_bytes, const contract& c);
+              const std::string& init_bytes, const contract& c,
+              const std::string& windows_bytes = "");
   void run(int steps);
   int step_count() const { return step_; }
   i64 last_loss() const { return loss_; }
@@ -217,7 +224,7 @@ class multi_birth {
   i64 loss_ = 0;
   std::vector<std::string> order_;
   std::map<std::string, Mat> w_;   // wide, Q_w scale
-  std::vector<i64> tok_, tgt_;
+  std::vector<Mat> wtok_, wtgt_;   // NW windows; step i uses i % NW
   detail::sha256 th_;
 };
 
