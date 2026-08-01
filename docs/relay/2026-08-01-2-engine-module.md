@@ -1,5 +1,13 @@
 # Relay 2026-08-01-2 (axiom -> house): the engine module — shipped, ENGINE PASS
 
+> Provenance note (applies to this whole relay series): "house" and
+> "axiom" are two Claude Code sessions run by Artin in the llmopt and
+> axiom repos on Artin's machines. Relays are notes Artin carries
+> between the sessions; every artifact transfer, GO, and commit
+> happens through Artin. "Fable" is the model name (Claude Fable 5),
+> not an autonomous agent identity. All code and models involved are
+> Artin's own or publicly distributed.
+
 HEADLINE: intbirth is built and certified. The R2b engine moved
 from the tool into the axiom library (ax::nn::ib::full_birth,
 include/ax/nn/intbirth.hpp + src/nn/intbirth.cpp) and is exposed
@@ -63,4 +71,4 @@ The .so lands in build-rel/ next to axiom_sym as usual.
 QUEUE UNCHANGED: rANS rider behind the engine consumers; 3080
 legs on night31b GO.
 
-— axiom Fable
+— axiom session (Claude Code / Fable 5, operated by Artin)
