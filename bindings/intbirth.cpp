@@ -302,16 +302,20 @@ PYBIND11_MODULE(intbirth, m) {
 
   py::class_<multi_birth>(m, "MultiBirth")
       .def(py::init([](const py::bytes& tables, const py::bytes& init,
-                       const py::dict& c) {
+                       const py::dict& c, const py::bytes& windows) {
              return new multi_birth(std::string(tables),
                                     std::string(init),
-                                    contract_from_dict(c));
+                                    contract_from_dict(c),
+                                    std::string(windows));
            }),
            py::arg("tables_bytes"), py::arg("init_bytes"),
            py::arg("contract"),
+           py::arg("windows_bytes") = py::bytes(),
            "the mb anatomy: emb -> Body x n_blocks -> rmsnorm(g_f) "
            "-> tied head; init in mb_ref.json param_order + tok + "
-           "tgt")
+           "tgt. Non-empty windows_bytes = NW x (tok[T] ++ tgt[T]) "
+           "records; init then carries params only; step i uses "
+           "window i mod NW")
       .def("run", &multi_birth::run, py::arg("steps"),
            py::call_guard<py::gil_scoped_release>())
       .def("mark", &multi_birth::mark)

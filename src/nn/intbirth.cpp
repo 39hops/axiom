@@ -773,7 +773,8 @@ void full_birth::step_once() {
 
 multi_birth::multi_birth(const std::string& tables_bytes,
                          const std::string& init_bytes,
-                         const contract& c)
+                         const contract& c,
+                         const std::string& windows_bytes)
     : blk_(tables_bytes, c), opt_(c.shift, c.lrn, c.lrd) {
   if (c.n_blocks < 1)
     throw std::runtime_error("intbirth: n_blocks < 1");
@@ -799,16 +800,35 @@ multi_birth::multi_birth(const std::string& tables_bytes,
     return m;
   };
   for (const auto& name : order_) w_[name] = take(numel(name));
-  tok_ = take(std::size_t(c.T));
-  tgt_ = take(std::size_t(c.T));
+  if (windows_bytes.empty()) {
+    wtok_.push_back(take(std::size_t(c.T)));
+    wtgt_.push_back(take(std::size_t(c.T)));
+  } else {
+    const std::size_t rec = std::size_t(c.T) * 2 * 8;
+    if (windows_bytes.size() % rec || windows_bytes.empty())
+      throw std::runtime_error("intbirth: bad windows length");
+    const std::size_t nw = windows_bytes.size() / rec;
+    for (std::size_t i = 0; i < nw; i++) {
+      Mat tk(c.T), tg(c.T);
+      std::memcpy(tk.data(), windows_bytes.data() + i * rec,
+                  std::size_t(c.T) * 8);
+      std::memcpy(tg.data(),
+                  windows_bytes.data() + i * rec + std::size_t(c.T) * 8,
+                  std::size_t(c.T) * 8);
+      wtok_.push_back(std::move(tk));
+      wtgt_.push_back(std::move(tg));
+    }
+  }
   if (off != init_bytes.size())
     throw std::runtime_error("intbirth: trailing init bytes");
-  for (const i64 t : tok_)
-    if (t < 0 || t >= c.V)
-      throw std::runtime_error("intbirth: token out of vocab");
-  for (const i64 t : tgt_)
-    if (t < 0 || t >= c.V)
-      throw std::runtime_error("intbirth: target out of vocab");
+  for (const Mat& tk : wtok_)
+    for (const i64 t : tk)
+      if (t < 0 || t >= c.V)
+        throw std::runtime_error("intbirth: token out of vocab");
+  for (const Mat& tg : wtgt_)
+    for (const i64 t : tg)
+      if (t < 0 || t >= c.V)
+        throw std::runtime_error("intbirth: target out of vocab");
   for (const auto& name : order_)
     for (auto& v : w_[name]) v <<= c.shift;  // lift to Q_w
 }
@@ -840,6 +860,8 @@ std::string multi_birth::weights_bytes() const {
 void multi_birth::step_once() {
   const contract& c = blk_.cfg();
   const int T = c.T, D = c.D, V = c.V, NB = c.n_blocks;
+  const Mat& tok_ = wtok_[std::size_t(step_) % wtok_.size()];
+  const Mat& tgt_ = wtgt_[std::size_t(step_) % wtgt_.size()];
   // Q-scale view of the wide params (the matmul boundary)
   std::map<std::string, Mat> nar;
   for (const auto& name : order_) {
