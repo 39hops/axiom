@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: >-
+  If you use axiom, or replicate a result through it, please cite it using
+  these metadata. Cite the exact commit you ran, not the project in the
+  abstract: axiom is a living ledger, and a verdict that names only "axiom"
+  is not reproducible. Replace the `commit` field below with the sha you
+  actually built.
+title: "axiom: an STL-only C++23 mathematics, symbolic-verification, and exact-neural-network library"
+abstract: >-
+  A from-scratch C++23 library implementing exact arbitrary-precision
+  arithmetic, linear algebra, statistics, numerical methods, a symbolic
+  (CAS) engine with a three-valued soundness contract, and exact
+  fixed-point neural-network inference and integer training. No external
+  numerical dependencies: no Eigen, GMP, Boost, BLAS, or torch. Its
+  integer NN engine (intbirth) serves as an independent cross-language
+  implementation for verifying deterministic training trajectories and
+  decodes produced by other runtimes.
+type: software
+authors:
+  - given-names: Artin
+    family-names: Azizi
+    email: artina613@gmail.com
+repository-code: "https://github.com/39hops/axiom"
+url: "https://github.com/39hops/axiom"
+license: Apache-2.0
+# The verification identity pinned by external replications. Change this to
+# the commit you built; a citation without a sha does not identify a result.
+commit: 8f8376d
+date-released: "2026-08-02"
+keywords:
+  - reproducibility
+  - determinism
+  - exact arithmetic
+  - fixed-point arithmetic
+  - computer algebra
+  - symbolic verification
+  - integer neural networks
+  - cross-implementation verification
+  - "C++23"
