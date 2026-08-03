@@ -49,6 +49,7 @@ add_executable(ax_tests
   sym/powpow_hang_test.cpp
   sym/jsonl_test.cpp
   sym/print_sstr_test.cpp
+  sym/print_lean_test.cpp
   sym/count_ops_test.cpp
   sym/series_test.cpp
   sym/risch_test.cpp
