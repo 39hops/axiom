@@ -35,6 +35,7 @@ add_library(axiom STATIC
   src/sym/jsonl.cpp
   src/sym/harness.cpp
   src/sym/print_sstr.cpp
+  src/sym/print_lean.cpp
   src/sym/count_ops.cpp
   src/sym/series.cpp
   src/sym/series_oracle.cpp

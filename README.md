@@ -188,6 +188,14 @@ harness for the sympy parity audit (~11 ms/row Release on farm-shaped
 `equiv_mod_const` rows). axiom becomes llmopt's oracle of record only after
 that parity run passes.
 
+`axiom-oracle --lean-cert <path>` additionally emits a Lean 4 certificate
+sidecar for the tactic-closable subset of EQUIVALENT verdicts (rational in x
+and opaque fn-atoms, integer exponents; `ring` / `field_simp; ring`), with
+ineligible rows counted, not silently dropped. Certificates prove the
+generalized identity over the atom table carried in each sidecar row —
+kernel-certified on that subset; the three-valued contract remains the
+production judge.
+
 `ax::nn` landed after that: AXNN fp32 inference, then FX-V1 exact fixed-point
 inference, then the `intbirth` integer-training engine through its MoE stage.
 Next up: the proof kernel (Phase 9) and the optional CUDA backend (Phase 10).
