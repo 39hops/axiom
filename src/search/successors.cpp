@@ -194,6 +194,15 @@ std::vector<std::pair<std::string, state>> successors(
                   << sym::count_ops(node) << " ops " << dt << "s"
                   << std::endl;
       if (rewrites.empty() && !aborted) fire_mask_record(r.first, node);
+      if (aborted) {
+        // An aborted fire is NOT a proven no-fire for the memo either:
+        // caching its empty result would poison rule_cache for the rest
+        // of the thread (Beam.Deterministic flake, relay addendum
+        // 2026-08-05: stale empty entries served to one run and not the
+        // other). Pay the retry; a budget-expired fire must stay
+        // observable, never become permanent.
+        return std::vector<expr>{};
+      }
       it = rule_cache.emplace(key, std::move(rewrites)).first;
     }
     return it->second;

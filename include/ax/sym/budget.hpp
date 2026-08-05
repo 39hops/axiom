@@ -21,14 +21,25 @@ namespace detail {
 inline thread_local std::chrono::steady_clock::time_point work_deadline{};
 inline thread_local bool work_budget_active = false;
 inline thread_local unsigned work_poll_counter = 0;
+inline thread_local unsigned long long work_expired_count = 0;
 }  // namespace detail
+
+/** Expiries observed on this thread since start. Budgets are WALL-CLOCK,
+    so any caller-visible result computed under one is deterministic only
+    while this counter holds still — callers asserting determinism
+    (Beam.Deterministic) must check it moved not at all, not assume. */
+inline unsigned long long work_expired_total() {
+  return detail::work_expired_count;
+}
 
 /** Poll the budget (cheap: real clock read only every 256 calls). */
 inline void check_work_budget() {
   if (!detail::work_budget_active) return;
   if ((++detail::work_poll_counter & 0xFF) != 0) return;
-  if (std::chrono::steady_clock::now() > detail::work_deadline)
+  if (std::chrono::steady_clock::now() > detail::work_deadline) {
+    ++detail::work_expired_count;
     throw work_expired();
+  }
 }
 
 /** RAII budget installer (budgets do not nest; inner scopes keep the
