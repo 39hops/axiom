@@ -12,11 +12,15 @@
     intra-argument sqrt->pow(1/2) merging) is never consulted, so a verdict
     that leaned on an unsound merge yields a loudly-failing certificate,
     not a quietly-matching one. Divisions quantify a nonzero hypothesis per
-    syntactic denominator and close by field_simp; try ring — the `try`
-    absorbs near-reflexive rows where field_simp alone closes the goal
-    and a bare trailing ring would error with "no goals" (relay
-    2026-08-05-1). Rows whose printed sides are byte-identical close by
-    rfl and are flagged reflexive. */
+    syntactic denominator and close by
+    `ring_nf at *; try field_simp; try ring` — field_simp discharges its
+    ≠0 side conditions by SYNTACTIC match against context hypotheses, so
+    hypothesis and denominator must share a normal form; the ring_nf
+    prelude provides it (17/28 of the kernel-sample underpowered class
+    close this way, 0/50 regressions). The `try`s keep partial closure
+    from erroring "no goals" (relay 2026-08-05-1 both directions). Rows
+    whose printed sides are byte-identical close by rfl and are flagged
+    reflexive. */
 #include <ax/sym/expr.hpp>
 
 #include <string>
@@ -32,7 +36,7 @@ struct lean_cert {
       (relay 2026-08-05-1) — filter on this before training/reward use. */
   bool reflexive = false;
   std::string statement;  // full `example ... := by <tactic>` line
-  std::string tactic;     // "rfl", "ring" or "field_simp; try ring"
+  std::string tactic;     // "rfl", "ring" or "ring_nf at *; try field_simp; try ring"
   std::string lhs;        // sstr of the parsed lhs (sidecar provenance)
   std::string rhs;
   /** atom name -> sstr of the generalized subterm, first-appearance order. */
