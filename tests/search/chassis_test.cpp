@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <ax/sym/budget.hpp>
 #include <ax/sym/calc.hpp>
 #include <ax/sym/oracle.hpp>
 #include <ax/sym/parse.hpp>
@@ -150,13 +151,25 @@ TEST(Beam, SolvesSmallRootAndReplayVerifies) {
 }
 
 TEST(Beam, Deterministic) {
+  // The contract is deterministic-modulo-budget: verify/fire budgets are
+  // WALL-CLOCK, so a loaded machine can expire one inside run a but not
+  // run b (house-observed flake, relay addendum 2026-08-05; reproduced
+  // locally via SIGSTOP). An expiry-contaminated pair proves nothing
+  // about determinism — retry it, and only fail on a clean mismatch.
   const expr root = parse("Integral(3*sin(x) + x**2, x)");
-  const auto a = beam_search(root, test_rules(), {});
-  const auto b = beam_search(root, test_rules(), {});
-  EXPECT_EQ(a.solved, b.solved);
-  EXPECT_TRUE(a.best.e.same(b.best.e));
-  EXPECT_EQ(a.best.history, b.best.history);
-  EXPECT_EQ(a.nodes, b.nodes);
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    const auto expired0 = ax::sym::work_expired_total();
+    const auto a = beam_search(root, test_rules(), {});
+    const auto b = beam_search(root, test_rules(), {});
+    if (ax::sym::work_expired_total() != expired0) continue;
+    EXPECT_EQ(a.solved, b.solved);
+    EXPECT_TRUE(a.best.e.same(b.best.e));
+    EXPECT_EQ(a.best.history, b.best.history);
+    EXPECT_EQ(a.nodes, b.nodes);
+    return;
+  }
+  GTEST_SKIP() << "work budget expired in 3 consecutive attempts; "
+                  "machine too loaded to observe determinism";
 }
 
 TEST(Beam, ProposeKNeverGuillotinesSolvedKid) {
