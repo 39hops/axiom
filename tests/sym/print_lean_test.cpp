@@ -74,10 +74,10 @@ TEST(LeanCert, SqrtInsideFnArgumentIsFrozenAndEligible) {
 TEST(LeanCert, DivisionEmitsNonzeroHypothesesAndFieldSimp) {
   const lean_cert c = to_lean("(x**2 - 1)/(x - 1)", "x + 1", x);
   ASSERT_TRUE(c.eligible);
-  EXPECT_EQ(c.tactic, "field_simp; try ring");
+  EXPECT_EQ(c.tactic, "ring_nf at *; try field_simp; try ring");
   EXPECT_EQ(c.statement,
             "example (x : ℝ) (h1 : x - 1 ≠ 0) : "
-            "(x^2 - 1)/(x - 1) = x + 1 := by field_simp; try ring");
+            "(x^2 - 1)/(x - 1) = x + 1 := by ring_nf at *; try field_simp; try ring");
 }
 
 TEST(LeanCert, NumericDenominatorNeedsNoHypothesis) {
@@ -111,7 +111,7 @@ TEST(LeanCert, DivisionTactisSoftenedToTryRing) {
   const lean_cert c = to_lean("(x**2 - 1)/(x - 1)", "x + 1", x);
   ASSERT_TRUE(c.eligible);
   EXPECT_FALSE(c.reflexive);
-  EXPECT_EQ(c.tactic, "field_simp; try ring");
+  EXPECT_EQ(c.tactic, "ring_nf at *; try field_simp; try ring");
 }
 
 TEST(LeanCert, NonReflexiveRingRowIsUnflagged) {

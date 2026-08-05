@@ -255,7 +255,7 @@ lean_cert to_lean(const std::string& lhs_raw, const std::string& rhs_raw,
   c.reflexive = lhs_p == rhs_p;
   c.tactic = c.reflexive ? "rfl"
              : w.dens.empty() ? "ring"
-                              : "field_simp; try ring";
+                              : "ring_nf at *; try field_simp; try ring";
   c.statement = "example (" + vars + " : ℝ)" + hyps + " : " + lhs_p +
                 " = " + rhs_p + " := by " + c.tactic;
   for (std::size_t i = 0; i < w.atoms.size(); ++i)
