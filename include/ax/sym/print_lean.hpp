@@ -12,7 +12,11 @@
     intra-argument sqrt->pow(1/2) merging) is never consulted, so a verdict
     that leaned on an unsound merge yields a loudly-failing certificate,
     not a quietly-matching one. Divisions quantify a nonzero hypothesis per
-    syntactic denominator and close by field_simp; ring. */
+    syntactic denominator and close by field_simp; try ring — the `try`
+    absorbs near-reflexive rows where field_simp alone closes the goal
+    and a bare trailing ring would error with "no goals" (relay
+    2026-08-05-1). Rows whose printed sides are byte-identical close by
+    rfl and are flagged reflexive. */
 #include <ax/sym/expr.hpp>
 
 #include <string>
@@ -23,8 +27,12 @@ namespace ax::sym {
 
 struct lean_cert {
   bool eligible = false;
+  /** Printed lhs and rhs are byte-identical (X = X after normalization).
+      Closed by rfl; degenerate for any verified-AND-distinct consumer
+      (relay 2026-08-05-1) — filter on this before training/reward use. */
+  bool reflexive = false;
   std::string statement;  // full `example ... := by <tactic>` line
-  std::string tactic;     // "ring" or "field_simp; ring"
+  std::string tactic;     // "rfl", "ring" or "field_simp; try ring"
   std::string lhs;        // sstr of the parsed lhs (sidecar provenance)
   std::string rhs;
   /** atom name -> sstr of the generalized subterm, first-appearance order. */
@@ -39,7 +47,8 @@ struct lean_cert {
 lean_cert to_lean(const std::string& lhs_raw, const std::string& rhs_raw,
                   const expr& x);
 
-/** One sidecar JSONL row: {"id","lhs","rhs","lean","tactic","atoms":{...}}. */
+/** One sidecar JSONL row:
+    {"id","lhs","rhs","lean","tactic","reflexive","atoms":{...}}. */
 std::string sidecar_line(const std::string& id, const lean_cert& c);
 
 }  // namespace ax::sym

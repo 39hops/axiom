@@ -74,16 +74,50 @@ TEST(LeanCert, SqrtInsideFnArgumentIsFrozenAndEligible) {
 TEST(LeanCert, DivisionEmitsNonzeroHypothesesAndFieldSimp) {
   const lean_cert c = to_lean("(x**2 - 1)/(x - 1)", "x + 1", x);
   ASSERT_TRUE(c.eligible);
-  EXPECT_EQ(c.tactic, "field_simp; ring");
+  EXPECT_EQ(c.tactic, "field_simp; try ring");
   EXPECT_EQ(c.statement,
             "example (x : ℝ) (h1 : x - 1 ≠ 0) : "
-            "(x^2 - 1)/(x - 1) = x + 1 := by field_simp; ring");
+            "(x^2 - 1)/(x - 1) = x + 1 := by field_simp; try ring");
 }
 
 TEST(LeanCert, NumericDenominatorNeedsNoHypothesis) {
+  // x/2 + x/2 merges to x at parse time, so the row lands reflexive;
+  // the point under test is the absence of a nonzero hypothesis.
   const lean_cert c = to_lean("x/2 + x/2", "x", x);
   ASSERT_TRUE(c.eligible);
-  EXPECT_EQ(c.tactic, "ring");
+  EXPECT_TRUE(c.reflexive);
+  EXPECT_EQ(c.statement.find("≠ 0"), std::string::npos);
+}
+
+// ------------------------------------------- reflexive rows (relay 2026-08-05-1)
+
+TEST(LeanCert, ReflexiveRowClosesByRflAndIsFlagged) {
+  const lean_cert c = to_lean("x + 1", "x + 1", x);
+  ASSERT_TRUE(c.eligible);
+  EXPECT_TRUE(c.reflexive);
+  EXPECT_EQ(c.tactic, "rfl");
+  EXPECT_EQ(c.statement, "example (x : ℝ) : x + 1 = x + 1 := by rfl");
+}
+
+TEST(LeanCert, ReflexiveAfterMergeNormalizationIsRfl) {
+  // Distinct raw strings that print identically after parse normalization.
+  const lean_cert c = to_lean("1/(x - 1)", "(x - 1)**(-1)", x);
+  ASSERT_TRUE(c.eligible);
+  EXPECT_TRUE(c.reflexive);
+  EXPECT_EQ(c.tactic, "rfl");
+}
+
+TEST(LeanCert, DivisionTactisSoftenedToTryRing) {
+  const lean_cert c = to_lean("(x**2 - 1)/(x - 1)", "x + 1", x);
+  ASSERT_TRUE(c.eligible);
+  EXPECT_FALSE(c.reflexive);
+  EXPECT_EQ(c.tactic, "field_simp; try ring");
+}
+
+TEST(LeanCert, NonReflexiveRingRowIsUnflagged) {
+  const lean_cert c = to_lean("(x + 1)**2", "x**2 + 2*x + 1", x);
+  ASSERT_TRUE(c.eligible);
+  EXPECT_FALSE(c.reflexive);
 }
 
 // ------------------------------------------------------------- sidecar row
@@ -94,6 +128,7 @@ TEST(LeanCert, SidecarLineIsWellFormedJson) {
   const std::string line = sidecar_line("row7", c);
   EXPECT_NE(line.find("\"id\":\"row7\""), std::string::npos);
   EXPECT_NE(line.find("\"tactic\":\"ring\""), std::string::npos);
+  EXPECT_NE(line.find("\"reflexive\":false"), std::string::npos);
   EXPECT_NE(line.find("\"atoms\":{\"a1\":\"sin(x)\"}"), std::string::npos);
   EXPECT_NE(line.find("\"lean\":\"example"), std::string::npos);
 }
