@@ -250,10 +250,14 @@ lean_cert to_lean(const std::string& lhs_raw, const std::string& rhs_raw,
     hyps += " (h" + std::to_string(i + 1) + " : " +
             pr.print(w.dens[i], p_add) + " ≠ 0)";
 
-  c.tactic = w.dens.empty() ? "ring" : "field_simp; ring";
-  c.statement = "example (" + vars + " : ℝ)" + hyps + " : " +
-                pr.print(lhs, p_add) + " = " + pr.print(rhs, p_add) +
-                " := by " + c.tactic;
+  const std::string lhs_p = pr.print(lhs, p_add);
+  const std::string rhs_p = pr.print(rhs, p_add);
+  c.reflexive = lhs_p == rhs_p;
+  c.tactic = c.reflexive ? "rfl"
+             : w.dens.empty() ? "ring"
+                              : "field_simp; try ring";
+  c.statement = "example (" + vars + " : ℝ)" + hyps + " : " + lhs_p +
+                " = " + rhs_p + " := by " + c.tactic;
   for (std::size_t i = 0; i < w.atoms.size(); ++i)
     c.atoms.emplace_back(names[i], to_sstr(w.atoms[i]));
   c.eligible = true;
@@ -269,7 +273,8 @@ std::string sidecar_line(const std::string& id, const lean_cert& c) {
   return "{\"id\":\"" + jsonl::escape(id) + "\",\"lhs\":\"" +
          jsonl::escape(c.lhs) + "\",\"rhs\":\"" + jsonl::escape(c.rhs) +
          "\",\"lean\":\"" + jsonl::escape(c.statement) + "\",\"tactic\":\"" +
-         jsonl::escape(c.tactic) + "\",\"atoms\":{" + atoms + "}}";
+         jsonl::escape(c.tactic) + "\",\"reflexive\":" +
+         (c.reflexive ? "true" : "false") + ",\"atoms\":{" + atoms + "}}";
 }
 
 }  // namespace ax::sym
