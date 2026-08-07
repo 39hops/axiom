@@ -164,6 +164,10 @@ class adamw {
             const std::vector<const Mat*>& grads);
   double nz_last() const { return nz_; }
   int step_count() const { return t_; }
+  /** Change lr = lrn/lrd between steps (schedule support; engine-scale
+      spec). Moments, bias-correction step count, and decay tables are
+      untouched — only the update's lr factor changes. */
+  void set_lr(i64 lrn, i64 lrd);
 
  private:
   int shift_, t_ = 0;
@@ -184,6 +188,8 @@ class full_birth {
              const std::string& init_bytes, const contract& c);
 
   void run(int steps);              ///< advance n training steps
+  /** Schedule point: lr = lrn/lrd for subsequent steps. */
+  void set_lr(i64 lrn, i64 lrd) { opt_.set_lr(lrn, lrd); }
   int step_count() const { return step_; }
   i64 last_loss() const { return loss_; }
   double nz_last() const { return opt_.nz_last(); }
@@ -225,6 +231,8 @@ class multi_birth {
               const std::string& init_bytes, const contract& c,
               const std::string& windows_bytes = "");
   void run(int steps);
+  /** Schedule point: lr = lrn/lrd for subsequent steps. */
+  void set_lr(i64 lrn, i64 lrd) { opt_.set_lr(lrn, lrd); }
   int step_count() const { return step_; }
   i64 last_loss() const { return loss_; }
   double nz_last() const { return opt_.nz_last(); }
@@ -262,6 +270,8 @@ class moe_birth {
             const std::string& init_bytes, const contract& c,
             const std::string& windows_bytes = "");
   void run(int steps);
+  /** Schedule point: lr = lrn/lrd for subsequent steps. */
+  void set_lr(i64 lrn, i64 lrd) { opt_.set_lr(lrn, lrd); }
   int step_count() const { return step_; }
   i64 last_loss() const { return loss_; }
   double nz_last() const { return opt_.nz_last(); }

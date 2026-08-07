@@ -856,6 +856,13 @@ adamw::adamw(int shift, i64 lrn, i64 lrd)
   p10_ = p9_ = p1000_ = p999_ = BigV{1};
 }
 
+void adamw::set_lr(i64 lrn, i64 lrd) {
+  if (lrn < 1 || lrd < 1)
+    throw std::runtime_error("intbirth: bad set_lr params");
+  lrn_ = lrn;
+  lrd_ = lrd;
+}
+
 void adamw::step(const std::vector<Mat*>& params,
                  const std::vector<const Mat*>& grads) {
   if (params.size() != grads.size())

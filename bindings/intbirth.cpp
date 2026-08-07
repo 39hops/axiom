@@ -328,6 +328,9 @@ PYBIND11_MODULE(intbirth, m) {
            }),
            py::arg("tables_bytes"), py::arg("init_bytes"),
            py::arg("contract"))
+      .def("set_lr", &full_birth::set_lr, py::arg("lrn"), py::arg("lrd"),
+           "Schedule point: lr = lrn/lrd for subsequent steps; "
+           "moments and bias-correction count untouched")
       .def("run", &full_birth::run, py::arg("steps"),
            py::call_guard<py::gil_scoped_release>())
       .def("mark", &full_birth::mark)
@@ -358,6 +361,9 @@ PYBIND11_MODULE(intbirth, m) {
            "tgt. Non-empty windows_bytes = NW x (tok[T] ++ tgt[T]) "
            "records; init then carries params only; step i uses "
            "window i mod NW")
+      .def("set_lr", &multi_birth::set_lr, py::arg("lrn"), py::arg("lrd"),
+           "Schedule point: lr = lrn/lrd for subsequent steps; "
+           "moments and bias-correction count untouched")
       .def("run", &multi_birth::run, py::arg("steps"),
            py::call_guard<py::gil_scoped_release>())
       .def("mark", &multi_birth::mark)
@@ -388,6 +394,9 @@ PYBIND11_MODULE(intbirth, m) {
            "optimizer steps (contract keys E/K/LN/LD). init in "
            "param_order (emb, b{i}.[wq wk wv wo g1 g2 wr, "
            "e{j}.wg/.wu/.wd], g_f) + tok+tgt tail iff no windows")
+      .def("set_lr", &moe_birth::set_lr, py::arg("lrn"), py::arg("lrd"),
+           "Schedule point: lr = lrn/lrd for subsequent steps; "
+           "moments and bias-correction count untouched")
       .def("run", &moe_birth::run, py::arg("steps"),
            py::call_guard<py::gil_scoped_release>())
       .def("mark", &moe_birth::mark)
