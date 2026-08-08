@@ -13,6 +13,30 @@ contract](#soundness-contract). And where axiom computes in integers, its
 results are **bit-identical across platforms by construction** rather than by
 tuning — see [Exact NN and deterministic birth](#exact-nn-and-deterministic-birth).
 
+## Verified results (cross-lab)
+
+axiom is one of a pair of labs; the other (llmopt) maintains its own
+results ledger, and every number below is booked on *that* side — the two
+repos' public claims are counterparty records of each other and cannot
+drift independently. Each bullet is one measured claim:
+
+- **E3 relay:** 50/50 token-identical replay of llmopt's engine
+  trajectories through axiom's C++ leg (llmopt RESULTS ledger).
+- **Certified row factory:** 167/167 emitted rows pass llmopt's
+  production oracle (`verify_wave`) — schema-exact, 0 diffs (llmopt
+  RESULTS ledger).
+- **Lean certificates:** 21,614/21,914 kernel-checked (98.63%) over the
+  74,426-row parity corpus, with all 300 failures classified (222
+  atom-split by design, 78 open `field_simp` cases) — booked llmopt-side.
+  Lineage: LEAN-TIER-1, 443 certificates, booked 2026-08-04.
+- **AXNN v1.1:** 20/20 cross-lab parity on the exact-inference container
+  format (llmopt RESULTS ledger).
+- **Emission audits:** 5-for-5 clean full audits on the llmopt side;
+  latest class: 0 contaminated rows in 145,011.
+
+Scale-sweep results (ENGINE-SCALE) are in flight and deliberately not
+cited here until their cross-lab verification books.
+
 ## Modules
 
 | Namespace  | Contents |
