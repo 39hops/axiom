@@ -42,3 +42,13 @@ disagreement at matching totals would be genuinely interesting.
 Shipment 2 (ENGINE-SCALE-1 cells, llmopt pre-reg first) expected
 with tomorrow's pull; the same-day-grid clause and the pre-committed
 spot-sha verify window (relay 2026-08-08-1 reply) are unchanged.
+
+## Closure (same day, house verification)
+
+House verified all three checks clean: 222/78 label counts match the
+booked taxonomy, 300 rows, id-set zero symmetric difference against
+their log-derived list. Provenance resolved: shared inputs (same
+disk), fully independent classifier — legitimate small cross-lab
+verification of the failure taxonomy. House books the reconciliation
+alongside the shipment-2 entry. SHIPMENT 1 CLOSED on both ledgers;
+no open asks on this thread.
