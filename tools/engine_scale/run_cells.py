@@ -12,8 +12,9 @@ Conventions relied on (each digest-gated in tools/int_adamw):
 - windows_bytes = NW x (tok[T] ++ tgt[T]): each shipped 33-id
   window w becomes tok=w[:32], tgt=w[1:33] (true next-token CE).
 - segmented run() + no-op set_lr is byte-identical to one-shot
-  (test_set_lr.py), so pausing every 125 steps to read .loss does
-  not perturb the digest.
+  (test_set_lr.py), so single-stepping to read .loss (the per-step
+  losses feeding the cycle-mean bar statistic) does not perturb
+  the digest.
 - SCHED=1: lrd *= 2 at ABSOLUTE steps 250/500/750 (lrd start 1000,
   the certified s4000-sched convention) — NOT pro-rata with STEPS.
 
@@ -66,32 +67,34 @@ def run_cell(intbirth, tables, row):
     mb = intbirth.MultiBirth(tables, params, C, windows_bytes=wb)
     steps, sched = c["STEPS"], c["SCHED"]
     assert steps % MILESTONE == 0, "STEPS not milestone-aligned"
-    # house convention: lrd *= 2 BEFORE step s in (250,500,750)
-    # executes, so the engine must pause after steps 249/499/749.
-    stops = set(range(MILESTONE, steps + 1, MILESTONE))
-    if sched:
-        stops |= {s - 1 for s in SCHED_STEPS}
-    lrd, prev, sha = 1000, 0, ""
-    milestones = []
+    nwin = c["NWIN"]
+    lrd, sha = 1000, ""
+    losses, milestones = [], []
     t0 = time.time()
-    for stop in sorted(stops):
-        mb.run(stop - prev)
-        prev = stop
-        if sched and stop + 1 in SCHED_STEPS:
+    # single-step segments (digest-proven identical to one-shot) so
+    # per-step losses feed the house cycle-mean statistic:
+    # cyc = sum(losses[-NWIN:]) // NWIN (detbwd_diet.py convention,
+    # exact Python floor semantics — the registered bar statistic).
+    for step in range(1, steps + 1):
+        if sched and step in SCHED_STEPS:
             lrd *= 2
             mb.set_lr(1, lrd)
-        if stop % MILESTONE == 0:
+        mb.run(1)
+        losses.append(mb.loss)
+        if step % MILESTONE == 0:
             # mark() FEEDS current weights into the cumulative traj
             # hash (the house 125-step convention) — call exactly
             # once per milestone, never elsewhere.
             sha = mb.mark()
-            milestones.append({"step": stop, "loss": mb.loss})
+            milestones.append({"step": step, "loss": mb.loss,
+                               "cyc": sum(losses[-nwin:]) // nwin})
     return {
         "cell": row["cell"], "bin": row["bin"],
         "bin_sha": row["bin_sha"], "win_sha": row["win_sha"],
         "n_params": row["n_params"], "contract": c,
         "milestones": milestones,
         "loss_final": milestones[-1]["loss"],
+        "cyc_final": milestones[-1]["cyc"],
         "final_traj_sha": sha,
         "wall_s": round(time.time() - t0, 2),
     }
@@ -117,7 +120,8 @@ def main():
             r = run_cell(intbirth, tables, row)
             f.write(json.dumps(r) + "\n")
             f.flush()
-            print(f"{r['cell']}: loss {r['loss_final']} "
+            print(f"{r['cell']}: cyc {r['cyc_final']} "
+                  f"loss {r['loss_final']} "
                   f"traj {r['final_traj_sha'][:16]} "
                   f"({r['wall_s']}s)", flush=True)
     print(f"wrote {a.out}")
