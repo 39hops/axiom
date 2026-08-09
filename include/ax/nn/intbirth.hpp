@@ -210,8 +210,12 @@ class full_birth {
   std::string mark();
   /** Current running trajectory digest without marking. */
   std::string traj_sha() const;
-  /** Wide (Q_w-scale) weights, KEYS order, int64 LE. */
+  /** Wide (Q_w-scale) weights, KEYS order, native-width LE
+      (8 bytes at Q9/Q32, 16 at Q64). */
   std::string weights_bytes() const;
+  /** Weights floored to the shipped grain (declared de-grain),
+      KEYS order, int64 LE — the cross-rung divergence view. */
+  std::string weights_grain9_bytes() const;
 
  private:
   // ENGINE-EXACT-1: one loop template, three wired rungs. The Q9

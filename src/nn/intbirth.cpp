@@ -209,7 +209,7 @@ void block::check_weights(const std::map<std::string, Mat>& w) const {
 
 Mat block::softmax_rows(const Mat& s, int rows, int C,
                         i64 scale) const {
-  return core::softmax_rows<i64, i64>(s, rows, C, scale,
+  return core::softmax_rows<i64, i64, core::RoundHalfAway>(s, rows, C, scale,
                                  tab_.at("exp.tab"), tse_,
                                  c_.precision - 9);
 }
@@ -510,6 +510,15 @@ std::string full_birth::traj_sha() const {
 std::string full_birth::weights_bytes() const {
   return std::visit(
       [](const auto& b) { return b.weights_bytes(); }, impl_);
+}
+std::string full_birth::weights_grain9_bytes() const {
+  return std::visit(
+      [](const auto& b) {
+        const auto g9 = b.weights_grain9();
+        return std::string(reinterpret_cast<const char*>(g9.data()),
+                           g9.size() * 8);
+      },
+      impl_);
 }
 
 // ------------------------------------------------------ multi_birth
