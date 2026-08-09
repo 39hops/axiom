@@ -95,7 +95,13 @@ struct Exact {
     return exr(x.v / d.v);
   }
   static exr div_trunc(const exr& x, const exr& d) {
-    return exr(x.v / d.v);  // exact — no truncation in the anchor
+    // exact — no truncation in the anchor. Seam experiment
+    // (2026-08-09, tiny fixture): swapping this for shipped
+    // trunc-to-integer semantics leaves anchor-vs-rung divergence
+    // BIT-IDENTICAL (mean 20.285 both ways) — the seam is
+    // exonerated; the residual is the frozen softmax-prob carry
+    // (PQ-unit quantization, grain-independent by design).
+    return exr(x.v / d.v);
   }
   static exr to_grain(const exr& x, int gshift) {
     const exr scaled = gshift ? (x >> gshift) : x;
