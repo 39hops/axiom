@@ -149,6 +149,65 @@ void rdiv_inplace(std::vector<Op>& m, Op d) {
   for (auto& v : m) v = Round::div(v, d);
 }
 
+// ---- Acc-form gemms: the raw wide sums, for callers that must sum
+// several gemm results (or fold a divisor) before the ONE rounding
+// the placement contract allows. finalize_rdiv is that rounding.
+
+template <class Op, class Acc>
+std::vector<Acc> gemm_acc(const std::vector<Op>& a, int rows, int K,
+                          const std::vector<Op>& w, int N) {
+  std::vector<Acc> y(std::size_t(rows) * N);
+  for (int t = 0; t < rows; t++)
+    for (int n = 0; n < N; n++) {
+      Acc acc = 0;
+      const Op* ar = &a[std::size_t(t) * K];
+      const Op* wr = &w[std::size_t(n) * K];
+      for (int k = 0; k < K; k++) acc += Acc(ar[k]) * Acc(wr[k]);
+      y[std::size_t(t) * N + n] = acc;
+    }
+  return y;
+}
+
+template <class Op, class Acc>
+std::vector<Acc> gemm_nt_acc(const std::vector<Op>& a, int rows,
+                             int K, const std::vector<Op>& w, int N) {
+  std::vector<Acc> y(std::size_t(rows) * N);
+  for (int t = 0; t < rows; t++)
+    for (int n = 0; n < N; n++) {
+      Acc acc = 0;
+      for (int k = 0; k < K; k++)
+        acc += Acc(a[std::size_t(t) * K + k]) *
+               Acc(w[std::size_t(k) * N + n]);
+      y[std::size_t(t) * N + n] = acc;
+    }
+  return y;
+}
+
+template <class Op, class Acc>
+std::vector<Acc> gemm_xty_acc(const std::vector<Op>& x, int rows,
+                              int K, const std::vector<Op>& y, int N) {
+  std::vector<Acc> o(std::size_t(K) * N, 0);
+  for (int t = 0; t < rows; t++)
+    for (int k = 0; k < K; k++) {
+      const Op xv = x[std::size_t(t) * K + k];
+      if (!xv) continue;
+      for (int n = 0; n < N; n++)
+        o[std::size_t(k) * N + n] +=
+            Acc(xv) * Acc(y[std::size_t(t) * N + n]);
+    }
+  return o;
+}
+
+/** The single post-sum rounding: Round::div each wide value by d,
+    narrow to Op. Placement identical to gemm-then-rdiv_inplace. */
+template <class Op, class Acc, class Round>
+std::vector<Op> finalize_rdiv(const std::vector<Acc>& a, Acc d) {
+  std::vector<Op> r(a.size());
+  for (std::size_t i = 0; i < a.size(); i++)
+    r[i] = narrow<Op, Acc>(Round::div(a[i], d));
+  return r;
+}
+
 /** rdiv of a two-Op product, accumulated wide: Round::div(a*b, d)
     with the product carried in Acc and the quotient narrowed. The
     ubiquitous engine idiom `rdiv(x * y, Q)` generalized. */
@@ -407,6 +466,326 @@ std::vector<Op> attn_bwd(const std::map<std::string, std::vector<Op>>& w,
   rdiv_inplace<Op, Round>(dh1, e.Q);  // one rdiv after the 3-term sum
   return rms_bwd<Op, Acc, Round>(dh1, c.x, w.at("g1"), c.i1, G["g1"],
                                  T, D, e.Q);
+}
+
+// ---- FFN (dense SwiGLU) ----
+// Frozen-grain silu seam: the table index is the gate value FLOORED
+// to shipped grain; table values re-embed to rung scale. Above/below
+// the table: identity arm stays at rung scale, derivative arm is Q_p.
+
+template <class Op, class Acc, class Round>
+std::vector<Op> ffn_fwd(const std::map<std::string, std::vector<Op>>& w,
+                        cache_t<Op>& c, const env<Op>& e) {
+  const int T = e.T, D = e.D, F = e.F;
+  const std::vector<std::int64_t>& sil = *e.sil;
+  c.h2 = rms_fwd<Op, Acc, Round>(c.x1, w.at("g2"), c.i2, T, D, e.Q,
+                                 e.eps32);
+  c.gp = finalize_rdiv<Op, Acc, Round>(
+      gemm_acc<Op, Acc>(c.h2, T, D, w.at("wg"), F), Acc(e.Q));
+  c.u = finalize_rdiv<Op, Acc, Round>(
+      gemm_acc<Op, Acc>(c.h2, T, D, w.at("wu"), F), Acc(e.Q));
+  c.sg.resize(c.gp.size());
+  c.f.resize(c.gp.size());
+  for (std::size_t i = 0; i < c.gp.size(); i++) {
+    const Op z = c.gp[i];
+    const std::int64_t zg =
+        std::int64_t(Round::to_grain(z, e.gshift));
+    c.sg[i] = zg > e.ts   ? z
+              : zg < -e.ts ? Op(0)
+                           : Round::from_grain(Op(sil[zg + e.ts]),
+                                               e.gshift);
+    c.f[i] = mul_rdiv<Op, Acc, Round>(c.sg[i], c.u[i], e.Q);
+  }
+  std::vector<Acc> pre2 = gemm_acc<Op, Acc>(c.f, T, F, w.at("wd"), D);
+  c.m2.assign(pre2.size(), 0);
+  c.x2.assign(pre2.size(), 0);
+  std::vector<Op> out(pre2.size());
+  for (std::size_t i = 0; i < pre2.size(); i++) {
+    const Op v =
+        narrow<Op, Acc>(Round::div(pre2[i], Acc(e.Q))) + c.x1[i];
+    c.m2[i] = (v <= e.CL && v >= -e.CL);
+    c.x2[i] = clampi<Op>(v, -e.CL, e.CL);
+  }
+  return c.x2;
+}
+
+template <class Op, class Acc, class Round>
+std::vector<Op> ffn_bwd(const std::map<std::string, std::vector<Op>>& w,
+                        const std::vector<Op>& dx2_masked,
+                        const cache_t<Op>& c,
+                        std::map<std::string, std::vector<Op>>& G,
+                        const env<Op>& e) {
+  const int T = e.T, D = e.D, F = e.F;
+  const std::vector<std::int64_t>& dsl = *e.dsl;
+  const std::vector<Op>& dx2 = dx2_masked;
+  std::vector<Op> df = finalize_rdiv<Op, Acc, Round>(
+      gemm_nt_acc<Op, Acc>(dx2, T, D, w.at("wd"), F), Acc(e.Q));
+  G["wd"] = finalize_rdiv<Op, Acc, Round>(
+      gemm_xty_acc<Op, Acc>(dx2, T, D, c.f, F), Acc(e.Q));
+  std::vector<Op> du(df.size()), dgp(df.size());
+  for (std::size_t i = 0; i < df.size(); i++) {
+    const std::int64_t zg =
+        std::int64_t(Round::to_grain(c.gp[i], e.gshift));
+    const Op dsv = zg > e.ts   ? e.Q
+                   : zg < -e.ts ? Op(0)
+                                : Round::from_grain(Op(dsl[zg + e.ts]),
+                                                    e.gshift);
+    du[i] = mul_rdiv<Op, Acc, Round>(c.sg[i], df[i], e.Q);
+    dgp[i] = narrow<Op, Acc>(Round::div(
+        Acc(mul_rdiv<Op, Acc, Round>(c.u[i], df[i], e.Q)) * Acc(dsv),
+        Acc(e.Q)));
+  }
+  std::vector<Acc> dh2a = gemm_nt_acc<Op, Acc>(du, T, F, w.at("wu"), D);
+  {
+    const std::vector<Acc> t2 =
+        gemm_nt_acc<Op, Acc>(dgp, T, F, w.at("wg"), D);
+    for (std::size_t i = 0; i < dh2a.size(); i++) dh2a[i] += t2[i];
+  }
+  // one rdiv after the two-term sum (placement contract)
+  const std::vector<Op> dh2 =
+      finalize_rdiv<Op, Acc, Round>(dh2a, Acc(e.Q));
+  G["wu"] = finalize_rdiv<Op, Acc, Round>(
+      gemm_xty_acc<Op, Acc>(du, T, F, c.h2, D), Acc(e.Q));
+  G["wg"] = finalize_rdiv<Op, Acc, Round>(
+      gemm_xty_acc<Op, Acc>(dgp, T, F, c.h2, D), Acc(e.Q));
+  return rms_bwd<Op, Acc, Round>(dh2, c.x1, w.at("g2"), c.i2,
+                                 G["g2"], T, D, e.Q);
+}
+
+// ---- MoE body (gravmoe): attn half shared, FFN becomes E experts,
+// top-1 router with fx3 multiplicative gate. Verbatim move; same
+// silu/softmax frozen-grain seams as the dense path.
+
+template <class Op, class Acc, class Round>
+std::vector<Op> moe_body_fwd(
+    const std::map<std::string, std::vector<Op>>& w,
+    const std::vector<Op>& x, cache_t<Op>& c, const env<Op>& e) {
+  using Vec = std::vector<Op>;
+  const int T = e.T, D = e.D, F = e.F, E = e.E;
+  const std::vector<std::int64_t>& sil = *e.sil;
+
+  attn_fwd<Op, Acc, Round>(w, x, c, e);  // fills c.x .. c.x1
+  c.h2 = rms_fwd<Op, Acc, Round>(c.x1, w.at("g2"), c.i2, T, D, e.Q,
+                                 e.eps32);
+
+  // router: r = rdiv(h2 @ wr^T, Q); p_r = softmax(PQ); top-1,
+  // lowest expert index wins ties (strict > scanning upward)
+  c.r = finalize_rdiv<Op, Acc, Round>(
+      gemm_acc<Op, Acc>(c.h2, T, D, w.at("wr"), E), Acc(e.Q));
+  c.pr = softmax_rows<Op>(c.r, T, E, e.PQ, *e.ex, e.tse, e.gshift);
+  c.top.assign(T, 0);
+  c.top_p.assign(T, 0);
+  for (int t = 0; t < T; t++) {
+    int best = 0;
+    for (int ee = 1; ee < E; ee++)
+      if (c.pr[std::size_t(t) * E + ee] >
+          c.pr[std::size_t(t) * E + best])
+        best = ee;
+    c.top[t] = best;
+    c.top_p[t] = c.pr[std::size_t(t) * E + best];
+  }
+
+  // selected expert's FFN per row (per-row independent, so
+  // computing row t with expert top[t]'s weights is exact)
+  c.egp.assign(std::size_t(T) * F, 0);
+  c.eu.assign(std::size_t(T) * F, 0);
+  c.esg.assign(std::size_t(T) * F, 0);
+  c.ef.assign(std::size_t(T) * F, 0);
+  c.eout.assign(std::size_t(T) * D, 0);
+  for (int t = 0; t < T; t++) {
+    const std::string p = "e" + std::to_string(c.top[t]);
+    const Vec& wg = w.at(p + ".wg");
+    const Vec& wu = w.at(p + ".wu");
+    const Vec& wd = w.at(p + ".wd");
+    for (int f = 0; f < F; f++) {
+      Acc ag = 0, au = 0;
+      for (int d = 0; d < D; d++) {
+        const Acc h = Acc(c.h2[std::size_t(t) * D + d]);
+        ag += h * Acc(wg[std::size_t(f) * D + d]);
+        au += h * Acc(wu[std::size_t(f) * D + d]);
+      }
+      const Op z = narrow<Op, Acc>(Round::div(ag, Acc(e.Q)));
+      c.egp[std::size_t(t) * F + f] = z;
+      c.eu[std::size_t(t) * F + f] =
+          narrow<Op, Acc>(Round::div(au, Acc(e.Q)));
+      const std::int64_t zg =
+          std::int64_t(Round::to_grain(z, e.gshift));
+      c.esg[std::size_t(t) * F + f] =
+          zg > e.ts   ? z
+          : zg < -e.ts ? Op(0)
+                       : Round::from_grain(Op(sil[zg + e.ts]),
+                                           e.gshift);
+      c.ef[std::size_t(t) * F + f] = mul_rdiv<Op, Acc, Round>(
+          c.esg[std::size_t(t) * F + f],
+          c.eu[std::size_t(t) * F + f], e.Q);
+    }
+    for (int d = 0; d < D; d++) {
+      Acc acc = 0;
+      for (int f = 0; f < F; f++)
+        acc += Acc(c.ef[std::size_t(t) * F + f]) *
+               Acc(wd[std::size_t(d) * F + f]);
+      c.eout[std::size_t(t) * D + d] =
+          narrow<Op, Acc>(Round::div(acc, Acc(e.Q)));
+    }
+  }
+
+  // gate + residual + clamp (fx3 multiplicative-gate convention)
+  Vec pre2(std::size_t(T) * D);
+  for (int t = 0; t < T; t++)
+    for (int d = 0; d < D; d++)
+      pre2[std::size_t(t) * D + d] =
+          mul_rdiv<Op, Acc, Round>(c.eout[std::size_t(t) * D + d],
+                                   c.top_p[t], Op(e.PQ)) +
+          c.x1[std::size_t(t) * D + d];
+  c.m2.assign(pre2.size(), 0);
+  c.x2.assign(pre2.size(), 0);
+  for (std::size_t i = 0; i < pre2.size(); i++) {
+    c.m2[i] = (pre2[i] <= e.CL && pre2[i] >= -e.CL);
+    c.x2[i] = clampi<Op>(pre2[i], -e.CL, e.CL);
+  }
+  return c.x2;
+}
+
+template <class Op, class Acc, class Round>
+std::map<std::string, std::vector<Op>> moe_body_bwd(
+    const std::map<std::string, std::vector<Op>>& w,
+    const std::vector<Op>& dxin, const cache_t<Op>& c,
+    std::vector<Op>* dx0_out, const env<Op>& e) {
+  using Vec = std::vector<Op>;
+  using VAcc = std::vector<Acc>;
+  const int T = e.T, D = e.D, F = e.F, E = e.E;
+  const Op PQ = Op(e.PQ);
+  const std::vector<std::int64_t>& dsl = *e.dsl;
+  std::map<std::string, Vec> G;
+
+  Vec dx2 = dxin;
+  for (std::size_t i = 0; i < dx2.size(); i++) dx2[i] *= c.m2[i];
+
+  // gate chain (relay 2026-08-01-6 pinned text): dgate = dx2*top_p
+  // kept EXACT (PQ-scaled, NO rounding at the gate); every consumer
+  // folds the /PQ into its own single rdiv (PQ*Q). d(top_p)[t] =
+  // rdiv(sum_d out[t,d]*dx2[t,d], Q) — /Q, the attention convention.
+  VAcc dgate(std::size_t(T) * D);
+  Vec dtp(T);
+  for (int t = 0; t < T; t++) {
+    Acc acc = 0;
+    for (int d = 0; d < D; d++) {
+      const std::size_t i = std::size_t(t) * D + d;
+      dgate[i] = Acc(dx2[i]) * Acc(c.top_p[t]);
+      acc += Acc(c.eout[i]) * Acc(dx2[i]);
+    }
+    dtp[t] = narrow<Op, Acc>(Round::div(acc, Acc(e.Q)));
+  }
+
+  // expert FFN backward per row; dW accumulated RAW per expert,
+  // one rdiv per expert after the token loop (the rdiv-grouping
+  // rule: same placement as the dense xty-then-round)
+  std::map<std::string, VAcc> GA;
+  for (int ee = 0; ee < E; ee++) {
+    const std::string p = "e" + std::to_string(ee);
+    GA[p + ".wg"].assign(std::size_t(F) * D, 0);
+    GA[p + ".wu"].assign(std::size_t(F) * D, 0);
+    GA[p + ".wd"].assign(std::size_t(D) * F, 0);
+  }
+  VAcc dh2a(std::size_t(T) * D, 0);
+  Vec df(F), du(F), dgp(F);
+  for (int t = 0; t < T; t++) {
+    const std::string p = "e" + std::to_string(c.top[t]);
+    const Vec& wg = w.at(p + ".wg");
+    const Vec& wu = w.at(p + ".wu");
+    const Vec& wd = w.at(p + ".wd");
+    VAcc& Gwg = GA.at(p + ".wg");
+    VAcc& Gwu = GA.at(p + ".wu");
+    VAcc& Gwd = GA.at(p + ".wd");
+    for (int f = 0; f < F; f++) {
+      Acc acc = 0;
+      for (int d = 0; d < D; d++)
+        acc += dgate[std::size_t(t) * D + d] *
+               Acc(wd[std::size_t(d) * F + f]);
+      df[f] = narrow<Op, Acc>(
+          Round::div(acc, Acc(PQ) * Acc(e.Q)));  // fold the gate /PQ
+      const std::int64_t zg = std::int64_t(
+          Round::to_grain(c.egp[std::size_t(t) * F + f], e.gshift));
+      const Op dsv = zg > e.ts   ? e.Q
+                     : zg < -e.ts ? Op(0)
+                                  : Round::from_grain(
+                                        Op(dsl[zg + e.ts]), e.gshift);
+      du[f] = mul_rdiv<Op, Acc, Round>(
+          c.esg[std::size_t(t) * F + f], df[f], e.Q);
+      dgp[f] = narrow<Op, Acc>(Round::div(
+          Acc(mul_rdiv<Op, Acc, Round>(c.eu[std::size_t(t) * F + f],
+                                       df[f], e.Q)) *
+              Acc(dsv),
+          Acc(e.Q)));
+    }
+    for (int f = 0; f < F; f++)
+      for (int d = 0; d < D; d++) {
+        Gwg[std::size_t(f) * D + d] +=
+            Acc(dgp[f]) * Acc(c.h2[std::size_t(t) * D + d]);
+        Gwu[std::size_t(f) * D + d] +=
+            Acc(du[f]) * Acc(c.h2[std::size_t(t) * D + d]);
+      }
+    for (int d = 0; d < D; d++)
+      for (int f = 0; f < F; f++)
+        Gwd[std::size_t(d) * F + f] +=
+            dgate[std::size_t(t) * D + d] *
+            Acc(c.ef[std::size_t(t) * F + f]);
+    // dh2 from expert weights (two-term sum, one rdiv after loop)
+    for (int d = 0; d < D; d++) {
+      Acc acc = 0;
+      for (int f = 0; f < F; f++)
+        acc += Acc(du[f]) * Acc(wu[std::size_t(f) * D + d]) +
+               Acc(dgp[f]) * Acc(wg[std::size_t(f) * D + d]);
+      dh2a[std::size_t(t) * D + d] = acc;
+    }
+  }
+  for (int ee = 0; ee < E; ee++) {
+    const std::string p = "e" + std::to_string(ee);
+    G[p + ".wg"] =
+        finalize_rdiv<Op, Acc, Round>(GA.at(p + ".wg"), Acc(e.Q));
+    G[p + ".wu"] =
+        finalize_rdiv<Op, Acc, Round>(GA.at(p + ".wu"), Acc(e.Q));
+    G[p + ".wd"] = finalize_rdiv<Op, Acc, Round>(
+        GA.at(p + ".wd"), Acc(PQ) * Acc(e.Q));  // dgate carries PQ
+  }
+  Vec dh2 = finalize_rdiv<Op, Acc, Round>(dh2a, Acc(e.Q));
+
+  // router: scatter d(top_p) into dp_r, softmax_bwd at PQ, then
+  // wr + h2 paths (each group finalized once, then summed)
+  Vec dpr(std::size_t(T) * E, 0);
+  for (int t = 0; t < T; t++)
+    dpr[std::size_t(t) * E + c.top[t]] = dtp[t];
+  Vec dr(std::size_t(T) * E);
+  for (int t = 0; t < T; t++) {
+    Acc inner = 0;
+    for (int ee = 0; ee < E; ee++)
+      inner += Acc(mul_rdiv<Op, Acc, Round>(
+          c.pr[std::size_t(t) * E + ee],
+          dpr[std::size_t(t) * E + ee], PQ));
+    for (int ee = 0; ee < E; ee++)
+      dr[std::size_t(t) * E + ee] = narrow<Op, Acc>(Round::div(
+          Acc(c.pr[std::size_t(t) * E + ee]) *
+              (Acc(dpr[std::size_t(t) * E + ee]) - inner),
+          Acc(PQ)));
+  }
+  G["wr"] = finalize_rdiv<Op, Acc, Round>(
+      gemm_xty_acc<Op, Acc>(dr, T, E, c.h2, D), Acc(e.Q));
+  {
+    const Vec dh2r = finalize_rdiv<Op, Acc, Round>(
+        gemm_nt_acc<Op, Acc>(dr, T, E, w.at("wr"), D), Acc(e.Q));
+    for (std::size_t i = 0; i < dh2.size(); i++) dh2[i] += dh2r[i];
+  }
+
+  Vec dx1 = rms_bwd<Op, Acc, Round>(dh2, c.x1, w.at("g2"), c.i2,
+                                    G["g2"], T, D, e.Q);
+  for (std::size_t i = 0; i < dx1.size(); i++)
+    dx1[i] = (dx1[i] + dx2[i]) * c.m1[i];
+  Vec dx0 = attn_bwd<Op, Acc, Round>(w, dx1, c, G, e);
+  if (dx0_out) {
+    for (std::size_t i = 0; i < dx0.size(); i++) dx0[i] += dx1[i];
+    *dx0_out = std::move(dx0);
+  }
+  return G;
 }
 
 }  // namespace ax::nn::ib::core
