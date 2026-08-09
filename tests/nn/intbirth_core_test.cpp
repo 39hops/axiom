@@ -32,11 +32,11 @@ TEST(IntbirthCore, I64InstantiationMatchesShippedGemmForms) {
 TEST(IntbirthCore, RoundHalfAwayMatchesShippedRdiv) {
   ib::Mat m{7, -7, 5, -5, 512, -513, 0, 1023, -1024}, m2 = m;
   ib::rdiv_inplace(m, 2);
-  ib::core::rdiv_inplace<i64, ib::core::RoundHalfAway<i64>>(m2, 2);
+  ib::core::rdiv_inplace<i64, ib::core::RoundHalfAway>(m2, 2);
   EXPECT_EQ(m, m2);
   ib::Mat a{100000, -99999, 314159}, a2 = a;
   ib::rdiv_inplace(a, 512);
-  ib::core::rdiv_inplace<i64, ib::core::RoundHalfAway<i64>>(a2, 512);
+  ib::core::rdiv_inplace<i64, ib::core::RoundHalfAway>(a2, 512);
   EXPECT_EQ(a, a2);
 }
 

@@ -13,6 +13,8 @@
     docs/specs/2026-08-08-engine-exact-ladder.md */
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -54,6 +56,108 @@ struct env {
   int gshift;
 };
 
+struct Shape {
+  int r, c;
+};
+
+// ---- big-uint limbs (little-endian u32) for the bias correction
+using BigV = std::vector<std::uint32_t>;
+inline void big_trim(BigV& d) {
+  while (d.size() > 1 && d.back() == 0) d.pop_back();
+}
+inline void big_mul(BigV& d, std::uint64_t k) {
+  std::uint64_t carry = 0;
+  for (auto& x : d) {
+    const std::uint64_t p = std::uint64_t(x) * k + carry;
+    x = std::uint32_t(p);
+    carry = p >> 32;
+  }
+  while (carry) { d.push_back(std::uint32_t(carry)); carry >>= 32; }
+}
+inline int big_bits(const BigV& d) {
+  std::uint32_t top = d.back();
+  int b = 0;
+  while (top) { b++; top >>= 1; }
+  return int(d.size() - 1) * 32 + b;
+}
+inline void big_shr1(BigV& d) {
+  for (std::size_t i = 0; i < d.size(); i++) {
+    const std::uint32_t lo = (i + 1 < d.size()) ? (d[i + 1] & 1) : 0;
+    d[i] = (d[i] >> 1) | (lo << 31);
+  }
+  big_trim(d);
+}
+inline bool big_gt_pow30(const BigV& d) {  // strictly greater than 2^30
+  const int b = big_bits(d);
+  if (b != 31) return b > 31;
+  return !(d.size() == 1 && d[0] == 0x40000000u);
+}
+inline std::int64_t big_i64(const BigV& d) {
+  std::uint64_t v = 0;
+  for (std::size_t i = d.size(); i-- > 0;) v = (v << 32) | d[i];
+  return std::int64_t(v);
+}
+inline BigV big_sub(const BigV& a, const BigV& b) {  // a >= b
+  BigV r(a.size(), 0);
+  std::int64_t borrow = 0;
+  for (std::size_t i = 0; i < a.size(); i++) {
+    const std::int64_t x = std::int64_t(a[i]) - (i < b.size() ? std::int64_t(b[i]) : 0) - borrow;
+    borrow = x < 0;
+    r[i] = std::uint32_t(x + (borrow << 32));
+  }
+  big_trim(r);
+  return r;
+}
+
+inline std::map<std::string, std::vector<std::int64_t>> parse_axp3(const std::string& b) {
+  const auto need = [&](std::size_t off, std::size_t n) {
+    if (off + n > b.size())
+      throw std::runtime_error("intbirth: truncated AXP3");
+  };
+  need(0, 8);
+  if (std::memcmp(b.data(), "AXP3", 4) != 0)
+    throw std::runtime_error("intbirth: bad AXP3 magic");
+  std::uint32_t count;
+  std::memcpy(&count, b.data() + 4, 4);
+  std::size_t off = 8;
+  std::map<std::string, std::vector<std::int64_t>> t;
+  for (std::uint32_t i = 0; i < count; i++) {
+    need(off, 2);
+    std::uint16_t nl;
+    std::memcpy(&nl, b.data() + off, 2);
+    off += 2;
+    need(off, nl + std::size_t(1));
+    std::string name(b.data() + off, nl);
+    off += nl;
+    const std::uint8_t nd = std::uint8_t(b[off++]);
+    std::uint64_t numel = 1;
+    need(off, std::size_t(nd) * 8);
+    for (int k = 0; k < nd; k++) {
+      std::uint64_t dd;
+      std::memcpy(&dd, b.data() + off, 8);
+      off += 8;
+      numel *= dd;
+    }
+    need(off, numel * 8);
+    std::vector<std::int64_t> m(numel);
+    std::memcpy(m.data(), b.data() + off, numel * 8);
+    off += numel * 8;
+    t[name] = std::move(m);
+  }
+  return t;
+}
+
+/** KEYS-order tensor shapes from the four dims (contract-free so
+    the core header stays independent of intbirth.hpp). */
+inline std::map<std::string, Shape> shapes(int DH, int D, int F,
+                                           int V) {
+  return {{"wq", {DH, D}}, {"wk", {DH, D}}, {"wv", {DH, D}},
+          {"wo", {D, DH}}, {"wg", {F, D}},  {"wu", {F, D}},
+          {"wd", {D, F}},  {"wh", {V, D}},  {"g1", {D, 1}},
+          {"g2", {D, 1}},  {"g3", {D, 1}}};
+}
+
+
 template <class Op>
 inline Op clampi(Op x, Op lo, Op hi) {
   return x < lo ? lo : (x > hi ? hi : x);
@@ -64,20 +168,26 @@ inline Op clampi(Op x, Op lo, Op hi) {
     transcendental sites truncate rung scale -> shipped scale,
     apply the shipped convention, and shift back. Both are no-ops
     at gshift == 0 (the Q9 rung). */
-template <class Op>
 struct RoundHalfAway {
-  static Op div(Op x, Op d) {  // verbatim shipped rdiv semantics
-    const Op ax = x < 0 ? -x : x;
-    const Op r = (ax + d / 2) / d;
-    return x < 0 ? -r : r;
+  /** verbatim shipped rdiv semantics, at the WIDTH OF ITS ARGUMENT
+      — division of a wide accumulator must never pre-narrow (the
+      Q64 build caught exactly that; i256 has no implicit narrowing,
+      the builtins silently did). */
+  template <class T>
+  static T div(T x, T d) {
+    const T ax = x < T(0) ? -x : x;
+    const T r = (ax + d / T(2)) / d;
+    return x < T(0) ? -r : r;
   }
   /** Rung scale -> shipped scale: FLOOR (arithmetic shift toward
       -inf), not round-half-away and not toward-zero truncation —
       the frozen-grain seam is declared as exactly this shift. */
-  static Op to_grain(Op x, int gshift) {
+  template <class T>
+  static T to_grain(T x, int gshift) {
     return gshift ? (x >> gshift) : x;
   }
-  static Op from_grain(Op x, int gshift) {  // exact re-embed
+  template <class T>
+  static T from_grain(T x, int gshift) {  // exact re-embed
     return gshift ? (x << gshift) : x;
   }
 };
@@ -239,15 +349,15 @@ inline std::int64_t isqrt_round(std::int64_t n) {
 /** Integer row softmax at `scale` units via the shipped exp table
     (the r1b construction). Frozen-grain seam: the table INDEX is
     the max-shifted logit FLOORED to the shipped grain (to_grain);
-    e, z, and the output all live at shipped/frozen scales at every
-    rung — deliberately no Acc/Round params, so the freeze cannot
-    be violated invisibly. `scale` must be a frozen carry (PQ
-    class, << 2^40): e*scale is then always safe in i64. Row sums
-    of the output are NOT exactly `scale` (per-element rounding,
-    no residual assignment) — nothing downstream may assume it. */
-template <class Op>
+    e and z live at shipped/frozen table scale (i64) at every rung —
+    the freeze cannot be violated invisibly. `scale` is the caller's
+    carry (frozen PQ class, or the operand grain for the loss path);
+    the e*scale product runs wide in Acc. Row sums of the output are
+    NOT exactly `scale` (per-element rounding, no residual
+    assignment) — nothing downstream may assume it. */
+template <class Op, class Acc, class Round = RoundHalfAway>
 std::vector<Op> softmax_rows(const std::vector<Op>& s, int rows,
-                             int C, std::int64_t scale,
+                             int C, Op scale,
                              const std::vector<std::int64_t>& ex,
                              std::int64_t tse, int gshift) {
   using i64 = std::int64_t;
@@ -259,15 +369,15 @@ std::vector<Op> softmax_rows(const std::vector<Op>& s, int rows,
       m = std::max(m, s[std::size_t(t) * C + cc]);
     i64 z = 0;
     for (int cc = 0; cc < C; cc++) {
-      i64 d = i64(RoundHalfAway<Op>::to_grain(  // floor to shipped
+      i64 d = i64(Round::to_grain(  // floor to shipped
           s[std::size_t(t) * C + cc] - m, gshift));
       if (d < -tse - 1) d = -tse - 1;
       e[cc] = d < -tse ? 0 : ex[d + tse];
       z += e[cc];
     }
     for (int cc = 0; cc < C; cc++)
-      p[std::size_t(t) * C + cc] =
-          Op(RoundHalfAway<i64>::div(e[cc] * scale, z));
+      p[std::size_t(t) * C + cc] = narrow<Op, Acc>(
+          Round::div(Acc(e[cc]) * Acc(scale), Acc(z)));
   }
   return p;
 }
@@ -401,7 +511,8 @@ std::vector<Op> attn_fwd(const std::map<std::string, std::vector<Op>>& w,
   for (int t = 0; t < T; t++)
     for (int u = t + 1; u < T; u++)
       s[std::size_t(t) * T + u] = floor_v;  // causal
-  c.p = softmax_rows<Op>(s, T, T, e.PQ, *e.ex, e.tse, e.gshift);
+  c.p = softmax_rows<Op, Acc>(s, T, T, Op(e.PQ), *e.ex, e.tse,
+                            e.gshift);
   c.a = finalize_rdiv<Op, Acc, Round>(
       gemm_nt_acc<Op, Acc>(c.p, T, T, c.v0, DH), Acc(e.PQ));
   std::vector<Op> pre1 = finalize_rdiv<Op, Acc, Round>(
@@ -580,7 +691,8 @@ std::vector<Op> moe_body_fwd(
   // lowest expert index wins ties (strict > scanning upward)
   c.r = finalize_rdiv<Op, Acc, Round>(
       gemm_acc<Op, Acc>(c.h2, T, D, w.at("wr"), E), Acc(e.Q));
-  c.pr = softmax_rows<Op>(c.r, T, E, e.PQ, *e.ex, e.tse, e.gshift);
+  c.pr = softmax_rows<Op, Acc>(c.r, T, E, Op(e.PQ), *e.ex,
+                             e.tse, e.gshift);
   c.top.assign(T, 0);
   c.top_p.assign(T, 0);
   for (int t = 0; t < T; t++) {
@@ -866,5 +978,328 @@ void adamw_update(std::vector<Op>& w, const std::vector<Op>& g,
     w[i] -= mul_rdiv<Op, Acc, Round>(w[i], Op(WDN), Op(WDD));
   }
 }
+
+// ---- the composed dense training loop, width-generic ----
+// (ENGINE-EXACT-1: full_birth is the <i64,i64> instantiation, gated
+// bit-identical by the r2b_ref digests; Q32 = <i64,__int128>; Q64 =
+// <__int128, ax::core::i256>. multi/moe stay <= Q32 by scope — no
+// registered rung needs Q64 there.)
+
+inline const char* const BIRTH_KEYS[11] = {"wq", "wk", "wv", "wo",
+                                           "wg", "wu", "wd", "wh",
+                                           "g1", "g2", "g3"};
+
+
+/** Copyable running sha256 (FIPS 180-4), header-only twin of
+    ib::detail::sha256 so the core stays free of intbirth.hpp; the
+    i64 birth_impl digests are gated equal to the shipped class by
+    the r2b drivers. */
+struct sha256h {
+  std::uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372,
+                        0xa54ff53a, 0x510e527f, 0x9b05688c,
+                        0x1f83d9ab, 0x5be0cd19};
+  std::uint8_t buf[64];
+  std::uint64_t len = 0;
+  std::size_t fill = 0;
+  void blk(const std::uint8_t* p) {
+    static const std::uint32_t K[64] = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b,
+        0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+        0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7,
+        0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152,
+        0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+        0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
+        0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
+        0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
+        0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    const auto rot = [](std::uint32_t x, int n) {
+      return (x >> n) | (x << (32 - n));
+    };
+    std::uint32_t w[64];
+    for (int i = 0; i < 16; i++)
+      w[i] = (std::uint32_t(p[4 * i]) << 24) |
+             (std::uint32_t(p[4 * i + 1]) << 16) |
+             (std::uint32_t(p[4 * i + 2]) << 8) |
+             std::uint32_t(p[4 * i + 3]);
+    for (int i = 16; i < 64; i++) {
+      const std::uint32_t s0 =
+          rot(w[i - 15], 7) ^ rot(w[i - 15], 18) ^ (w[i - 15] >> 3);
+      const std::uint32_t s1 =
+          rot(w[i - 2], 17) ^ rot(w[i - 2], 19) ^ (w[i - 2] >> 10);
+      w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    std::uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4],
+                  f = h[5], g = h[6], hh = h[7];
+    for (int i = 0; i < 64; i++) {
+      const std::uint32_t S1 = rot(e, 6) ^ rot(e, 11) ^ rot(e, 25);
+      const std::uint32_t ch = (e & f) ^ (~e & g);
+      const std::uint32_t t1 = hh + S1 + ch + K[i] + w[i];
+      const std::uint32_t S0 = rot(a, 2) ^ rot(a, 13) ^ rot(a, 22);
+      const std::uint32_t mj = (a & b) ^ (a & c) ^ (b & c);
+      const std::uint32_t t2 = S0 + mj;
+      hh = g; g = f; f = e; e = d + t1;
+      d = c; c = b; b = a; a = t1 + t2;
+    }
+    h[0] += a; h[1] += b; h[2] += c; h[3] += d;
+    h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+  }
+  void update(const void* data, std::size_t n) {
+    const std::uint8_t* p = static_cast<const std::uint8_t*>(data);
+    len += n;
+    while (n) {
+      const std::size_t take = 64 - fill < n ? 64 - fill : n;
+      std::memcpy(buf + fill, p, take);
+      fill += take;
+      p += take;
+      n -= take;
+      if (fill == 64) {
+        blk(buf);
+        fill = 0;
+      }
+    }
+  }
+  std::string hex() {
+    const std::uint64_t bits = len * 8;
+    const std::uint8_t pad = 0x80;
+    update(&pad, 1);
+    const std::uint8_t z = 0;
+    while (fill != 56) update(&z, 1);
+    std::uint8_t lb[8];
+    for (int i = 0; i < 8; i++)
+      lb[i] = std::uint8_t(bits >> (56 - 8 * i));
+    update(lb, 8);
+    char out[65];
+    for (int i = 0; i < 8; i++)
+      std::snprintf(out + 8 * i, 9, "%08x", h[i]);
+    return std::string(out, 64);
+  }
+};
+
+/** dims/scales from a contract-shaped bundle (kept as plain ints
+    so this header stays independent of intbirth.hpp). */
+struct birth_cfg_t {
+  int T, D, DH, F, V, shift, precision;
+  std::int64_t gboost, pq, act_clamp, eps32, lrn, lrd;
+};
+
+template <class Op, class Acc, class Round>
+class birth_impl {
+ public:
+  using Vec = std::vector<Op>;
+  using cfg = birth_cfg_t;
+
+  birth_impl(const std::string& tables_bytes,
+             const std::string& init_bytes, const cfg& c)
+      : c_(c) {
+    if (c.T <= 0 || c.D <= 0 || c.DH <= 0 || c.F <= 0 || c.V <= 0 ||
+        c.DH % 2 || c.shift < 0 || c.gboost < 1 || c.pq < 1 ||
+        c.act_clamp < 1 || c.lrd < 1 || c.lrn < 1 || c.eps32 < 1)
+      throw std::runtime_error("intbirth: bad contract");
+    tab_ = parse_axp3(tables_bytes);
+    for (const char* k : {"silu.tab", "dsilu.tab", "exp.tab",
+                          "rope.cos", "rope.sin"})
+      if (!tab_.count(k))
+        throw std::runtime_error(std::string("intbirth: missing ") +
+                                 k);
+    ts_ = (std::int64_t(tab_.at("silu.tab").size()) - 1) / 2;
+    tse_ = std::int64_t(tab_.at("exp.tab").size()) - 1;
+    if (std::int64_t(tab_.at("dsilu.tab").size()) != 2 * ts_ + 1 ||
+        std::int64_t(tab_.at("rope.cos").size()) !=
+            std::int64_t(c.T) * (c.DH / 2) ||
+        std::int64_t(tab_.at("rope.sin").size()) !=
+            std::int64_t(c.T) * (c.DH / 2))
+      throw std::runtime_error("intbirth: table size mismatch");
+    const int g = c.precision - 9;
+    // frozen-grain attn scale: shipped isqrt, then re-embed
+    std::int64_t s9 = 512 * 512 * std::int64_t(c.DH);
+    {  // isqrt_round at shipped grain
+      const std::int64_t r = isqrt_newton(s9);
+      scale9_ = (s9 - r * r > (r + 1) * (r + 1) - s9) ? r + 1 : r;
+    }
+    // init: 11 KEYS tensors, x [T,D], tgt [T] — i64 LE at shipped
+    // grain (the handoff convention at every rung)
+    const auto sh = shapes(c.DH, c.D, c.F, c.V);
+    std::size_t off = 0;
+    const auto take = [&](std::size_t n) {
+      if (off + n * 8 > init_bytes.size())
+        throw std::runtime_error("intbirth: truncated init");
+      std::vector<std::int64_t> m(n);
+      std::memcpy(m.data(), init_bytes.data() + off, n * 8);
+      off += n * 8;
+      return m;
+    };
+    for (const char* k : BIRTH_KEYS) {
+      const auto s = sh.at(k);
+      const auto raw = take(std::size_t(s.r) * s.c);
+      Vec& wv = w_[k];
+      wv.resize(raw.size());
+      for (std::size_t i = 0; i < raw.size(); i++)
+        wv[i] = Op(raw[i]) << (c.shift + g);  // lift to rung Q_w
+    }
+    {
+      const auto raw = take(std::size_t(c.T) * c.D);
+      x_.resize(raw.size());
+      for (std::size_t i = 0; i < raw.size(); i++)
+        x_[i] = Op(raw[i]) << g;  // exact re-embed
+    }
+    tgt_ = take(std::size_t(c.T));
+    if (off != init_bytes.size())
+      throw std::runtime_error("intbirth: trailing init bytes");
+    for (const std::int64_t t : tgt_)
+      if (t < 0 || t >= c.V)
+        throw std::runtime_error("intbirth: target out of vocab");
+  }
+
+  void run(int steps) {
+    for (int i = 0; i < steps; i++) step_once();
+  }
+  void set_lr(std::int64_t lrn, std::int64_t lrd) {
+    if (lrn < 1 || lrd < 1)
+      throw std::runtime_error("intbirth: bad set_lr params");
+    c_.lrn = lrn;
+    c_.lrd = lrd;
+  }
+  int step_count() const { return step_; }
+  /** milestone loss, de-grained to the shipped scale (declared) */
+  std::int64_t last_loss() const {
+    return std::int64_t(Round::to_grain(loss_, c_.precision - 9));
+  }
+  double nz_last() const { return nz_; }
+
+  std::string mark() {
+    for (const char* k : BIRTH_KEYS)
+      th_.update(w_.at(k).data(), w_.at(k).size() * sizeof(Op));
+    return traj_sha();
+  }
+  std::string traj_sha() const {
+    sha256h peek = th_;
+    return peek.hex();
+  }
+  std::string weights_bytes() const {
+    std::string out;
+    for (const char* k : BIRTH_KEYS) {
+      const auto& w = w_.at(k);
+      out.append(reinterpret_cast<const char*>(w.data()),
+                 w.size() * sizeof(Op));
+    }
+    return out;
+  }
+  /** weights de-grained to shipped-scale i64 (for cross-rung
+      divergence readouts; declared floor per the convention pin) */
+  std::vector<std::int64_t> weights_grain9() const {
+    std::vector<std::int64_t> out;
+    for (const char* k : BIRTH_KEYS)
+      for (const Op v : w_.at(k))
+        out.push_back(std::int64_t(
+            Round::to_grain(v, c_.precision - 9)));
+    return out;
+  }
+
+ private:
+  env<Op> make_env() const {
+    env<Op> e;
+    e.T = c_.T; e.D = c_.D; e.DH = c_.DH; e.F = c_.F; e.V = c_.V;
+    e.E = 0;
+    e.PQ = c_.pq;
+    e.CL = Op(c_.act_clamp) << (c_.precision - 9);
+    e.Q = Op(1) << c_.precision;
+    e.scale = Op(scale9_) << (c_.precision - 9);
+    e.eps32 = c_.eps32;
+    e.ts = ts_; e.tse = tse_;
+    e.tcos = &tab_.at("rope.cos"); e.tsin = &tab_.at("rope.sin");
+    e.sil = &tab_.at("silu.tab"); e.dsl = &tab_.at("dsilu.tab");
+    e.ex = &tab_.at("exp.tab");
+    e.gshift = c_.precision - 9;
+    return e;
+  }
+
+  void step_once() {
+    const env<Op> e = make_env();
+    const Op qc = e.Q;
+    // Q-scale view of the wide weights (the matmul boundary)
+    std::map<std::string, Vec> w;
+    for (const char* k : BIRTH_KEYS) {
+      w[k] = w_.at(k);
+      for (auto& v : w[k]) v = Round::div(v, Op(1) << c_.shift);
+    }
+    cache_t<Op> bc;
+    attn_fwd<Op, Acc, Round>(w, x_, bc, e);   // fills bc.x .. bc.x1
+    const Vec x2 = ffn_fwd<Op, Acc, Round>(w, bc, e);
+    const Vec logits = fwd_head<Op, Acc, Round>(w, x2, bc, e);
+    const Vec pp = softmax_rows<Op, Acc>(logits, c_.T, c_.V, qc,
+                                         *e.ex, tse_, e.gshift);
+    Op loss = 0;
+    for (int t = 0; t < c_.T; t++)
+      loss += qc - pp[std::size_t(t) * c_.V + tgt_[t]];
+    loss_ = loss;
+    Vec dlogits(std::size_t(c_.T) * c_.V);
+    for (int t = 0; t < c_.T; t++)
+      for (int vv = 0; vv < c_.V; vv++)
+        dlogits[std::size_t(t) * c_.V + vv] =
+            (pp[std::size_t(t) * c_.V + vv] -
+             qc * Op(tgt_[t] == vv)) *
+            Op(c_.gboost);
+    std::map<std::string, Vec> G;
+    const Vec dx2in =
+        bwd_head<Op, Acc, Round>(w, dlogits, bc, G, e);
+    {  // dense body backward (masks + residual chain, no dx0)
+      Vec dx2 = dx2in;
+      for (std::size_t i = 0; i < dx2.size(); i++) dx2[i] *= bc.m2[i];
+      Vec dx1 = ffn_bwd<Op, Acc, Round>(w, dx2, bc, G, e);
+      for (std::size_t i = 0; i < dx1.size(); i++)
+        dx1[i] = (dx1[i] + dx2[i]) * bc.m1[i];
+      attn_bwd<Op, Acc, Round>(w, dx1, bc, G, e);
+    }
+    // unboost + optimizer
+    t_ += 1;
+    big_mul(p10_, 10); big_mul(p9_, 9);
+    big_mul(p1000_, 1000); big_mul(p999_, 999);
+    BigV n1 = p10_, d1 = big_sub(p10_, p9_);
+    BigV n2 = p1000_, d2 = big_sub(p1000_, p999_);
+    while (big_gt_pow30(n1)) { big_shr1(n1); big_shr1(d1); }
+    while (big_gt_pow30(n2)) { big_shr1(n2); big_shr1(d2); }
+    const std::int64_t bc1n = big_i64(n1);
+    const std::int64_t bc1d = std::max<std::int64_t>(big_i64(d1), 1);
+    const std::int64_t bc2n = big_i64(n2);
+    const std::int64_t bc2d = std::max<std::int64_t>(big_i64(d2), 1);
+    if (m_.empty()) {
+      for (const char* k : BIRTH_KEYS) {
+        m_.emplace_back(w_.at(k).size(), Op(0));
+        v_.emplace_back(w_.at(k).size(), Op(0));
+      }
+    }
+    std::int64_t nz = 0, tot = 0;
+    int j = 0;
+    for (const char* k : BIRTH_KEYS) {
+      Vec g = std::move(G.at(k));
+      for (auto& v : g)  // unboost: one rdiv at qc*gboost
+        v = narrow<Op, Acc>(Round::div(
+            Acc(v), Acc(qc) * Acc(c_.gboost)));
+      adamw_update<Op, Acc, Round>(
+          w_.at(k), g, m_[j], v_[j], bc1n, bc1d, bc2n, bc2d, e.Q,
+          c_.shift, c_.lrn, c_.lrd, e.gshift, nz, tot);
+      j++;
+    }
+    nz_ = double(nz) / double(tot);
+    step_ += 1;
+  }
+
+  cfg c_;
+  std::map<std::string, std::vector<std::int64_t>> tab_;
+  std::int64_t scale9_ = 0, ts_ = 0, tse_ = 0;
+  std::map<std::string, Vec> w_;
+  Vec x_;
+  std::vector<std::int64_t> tgt_;
+  std::vector<Vec> m_, v_;
+  BigV p10_{1}, p9_{1}, p1000_{1}, p999_{1};
+  int t_ = 0, step_ = 0;
+  Op loss_ = 0;
+  double nz_ = 0;
+  sha256h th_;
+};
 
 }  // namespace ax::nn::ib::core

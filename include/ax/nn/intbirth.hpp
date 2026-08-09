@@ -21,8 +21,10 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <variant>
 #include <vector>
 
+#include <ax/core/int256.hpp>
 #include <ax/nn/intbirth_core.hpp>
 
 namespace ax::nn::ib {
@@ -196,10 +198,11 @@ class full_birth {
 
   void run(int steps);              ///< advance n training steps
   /** Schedule point: lr = lrn/lrd for subsequent steps. */
-  void set_lr(i64 lrn, i64 lrd) { opt_.set_lr(lrn, lrd); }
-  int step_count() const { return step_; }
-  i64 last_loss() const { return loss_; }
-  double nz_last() const { return opt_.nz_last(); }
+  void set_lr(i64 lrn, i64 lrd);
+  int step_count() const;
+  /** milestone loss (de-grained to shipped scale above Q9) */
+  i64 last_loss() const;
+  double nz_last() const;
 
   /** Feed the current wide weights (KEYS order) into the running
       trajectory hash — the milestone protocol — and return its
@@ -211,14 +214,15 @@ class full_birth {
   std::string weights_bytes() const;
 
  private:
-  void step_once();
-  block blk_;
-  adamw opt_;
-  int step_ = 0;
-  i64 loss_ = 0;
-  std::map<std::string, Mat> w_;   // wide, Q_w scale
-  std::vector<i64> x_, tgt_;
-  detail::sha256 th_;
+  // ENGINE-EXACT-1: one loop template, three wired rungs. The Q9
+  // alternative is digest-gated bit-identical to the pre-ladder
+  // class; Q64 exists only on this dense path (multi/moe <= Q32).
+  std::variant<
+      core::birth_impl<i64, i64, core::RoundHalfAway>,
+      core::birth_impl<i64, __int128, core::RoundHalfAway>,
+      core::birth_impl<__int128, ax::core::i256,
+                       core::RoundHalfAway>>
+      impl_;
 };
 
 /** The multi-block composed loop (mb spec: emb -> Body x n_blocks

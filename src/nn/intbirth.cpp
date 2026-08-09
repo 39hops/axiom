@@ -47,105 +47,6 @@ i64 isqrt_round(i64 n) {
   return (n - r * r > (r + 1) * (r + 1) - n) ? r + 1 : r;
 }
 
-// ---- big-uint limbs (little-endian u32) for the bias correction
-using BigV = std::vector<u32>;
-void big_trim(BigV& d) {
-  while (d.size() > 1 && d.back() == 0) d.pop_back();
-}
-void big_mul(BigV& d, u64 k) {
-  u64 carry = 0;
-  for (auto& x : d) {
-    const u64 p = u64(x) * k + carry;
-    x = u32(p);
-    carry = p >> 32;
-  }
-  while (carry) { d.push_back(u32(carry)); carry >>= 32; }
-}
-int big_bits(const BigV& d) {
-  u32 top = d.back();
-  int b = 0;
-  while (top) { b++; top >>= 1; }
-  return int(d.size() - 1) * 32 + b;
-}
-void big_shr1(BigV& d) {
-  for (std::size_t i = 0; i < d.size(); i++) {
-    const u32 lo = (i + 1 < d.size()) ? (d[i + 1] & 1) : 0;
-    d[i] = (d[i] >> 1) | (lo << 31);
-  }
-  big_trim(d);
-}
-bool big_gt_pow30(const BigV& d) {  // strictly greater than 2^30
-  const int b = big_bits(d);
-  if (b != 31) return b > 31;
-  return !(d.size() == 1 && d[0] == 0x40000000u);
-}
-i64 big_i64(const BigV& d) {
-  u64 v = 0;
-  for (std::size_t i = d.size(); i-- > 0;) v = (v << 32) | d[i];
-  return i64(v);
-}
-BigV big_sub(const BigV& a, const BigV& b) {  // a >= b
-  BigV r(a.size(), 0);
-  i64 borrow = 0;
-  for (std::size_t i = 0; i < a.size(); i++) {
-    const i64 x = i64(a[i]) - (i < b.size() ? i64(b[i]) : 0) - borrow;
-    borrow = x < 0;
-    r[i] = u32(x + (borrow << 32));
-  }
-  big_trim(r);
-  return r;
-}
-
-std::map<std::string, Mat> parse_axp3(const std::string& b) {
-  const auto need = [&](std::size_t off, std::size_t n) {
-    if (off + n > b.size())
-      throw std::runtime_error("intbirth: truncated AXP3");
-  };
-  need(0, 8);
-  if (std::memcmp(b.data(), "AXP3", 4) != 0)
-    throw std::runtime_error("intbirth: bad AXP3 magic");
-  u32 count;
-  std::memcpy(&count, b.data() + 4, 4);
-  std::size_t off = 8;
-  std::map<std::string, Mat> t;
-  for (u32 i = 0; i < count; i++) {
-    need(off, 2);
-    std::uint16_t nl;
-    std::memcpy(&nl, b.data() + off, 2);
-    off += 2;
-    need(off, nl + std::size_t(1));
-    std::string name(b.data() + off, nl);
-    off += nl;
-    const u8 nd = u8(b[off++]);
-    u64 numel = 1;
-    need(off, std::size_t(nd) * 8);
-    for (int k = 0; k < nd; k++) {
-      u64 dd;
-      std::memcpy(&dd, b.data() + off, 8);
-      off += 8;
-      numel *= dd;
-    }
-    need(off, numel * 8);
-    Mat m(numel);
-    std::memcpy(m.data(), b.data() + off, numel * 8);
-    off += numel * 8;
-    t[name] = std::move(m);
-  }
-  return t;
-}
-
-struct Shape {
-  int r, c;
-};
-std::map<std::string, Shape> shapes(const contract& c) {
-  return {{"wq", {c.DH, c.D}}, {"wk", {c.DH, c.D}},
-          {"wv", {c.DH, c.D}}, {"wo", {c.D, c.DH}},
-          {"wg", {c.F, c.D}},  {"wu", {c.F, c.D}},
-          {"wd", {c.D, c.F}},  {"wh", {c.V, c.D}},
-          {"g1", {c.D, 1}},    {"g2", {c.D, 1}},
-          {"g3", {c.D, 1}}};
-}
-
 }  // namespace
 
 // ---------------------------------------------------------- sha256
@@ -241,7 +142,7 @@ Mat int_gemm_xty(const Mat& x, int rows, int K, const Mat& y, int N) {
   return core::gemm_xty<i64, i64>(x, rows, K, y, N);
 }
 void rdiv_inplace(Mat& m, i64 d) {
-  core::rdiv_inplace<i64, core::RoundHalfAway<i64>>(m, d);
+  core::rdiv_inplace<i64, core::RoundHalfAway>(m, d);
 }
 
 // ------------------------------------------------------------ block
@@ -272,7 +173,7 @@ block::block(const std::string& tables_bytes, const contract& c)
   // *4^k, so the shipped-grain isqrt is computed first and then
   // re-embedded (declared convention; no-op at precision 9).
   scale_ = isqrt_round(Q * Q * i64(c_.DH)) << (c_.precision - 9);
-  tab_ = parse_axp3(tables_bytes);
+  tab_ = core::parse_axp3(tables_bytes);
   for (const char* k : {"silu.tab", "dsilu.tab", "exp.tab",
                         "rope.cos", "rope.sin"})
     if (!tab_.count(k))
@@ -288,7 +189,7 @@ block::block(const std::string& tables_bytes, const contract& c)
 namespace {
 void check_keys(const contract& c, const std::map<std::string, Mat>& w,
                 const char* const* keys, int n) {
-  const auto sh = shapes(c);
+  const auto sh = core::shapes(c.DH, c.D, c.F, c.V);
   for (int i = 0; i < n; i++) {
     const auto it = w.find(keys[i]);
     if (it == w.end())
@@ -308,7 +209,7 @@ void block::check_weights(const std::map<std::string, Mat>& w) const {
 
 Mat block::softmax_rows(const Mat& s, int rows, int C,
                         i64 scale) const {
-  return core::softmax_rows<i64>(s, rows, C, scale,
+  return core::softmax_rows<i64, i64>(s, rows, C, scale,
                                  tab_.at("exp.tab"), tse_,
                                  c_.precision - 9);
 }
@@ -318,18 +219,18 @@ Mat block::rms_fwd(const Mat& xx, const Mat& g, Mat& isq) const {
   if (i64(xx.size()) != i64(T) * D || i64(g.size()) != D)
     throw std::runtime_error("intbirth: rms_fwd shape");
   if (c_.precision != 9)
-    return core::rms_fwd<i64, __int128, core::RoundHalfAway<i64>>(
+    return core::rms_fwd<i64, __int128, core::RoundHalfAway>(
   xx, g, isq, T, D, contract_Q(c_), c_.eps32);
-  return core::rms_fwd<i64, i64, core::RoundHalfAway<i64>>(
+  return core::rms_fwd<i64, i64, core::RoundHalfAway>(
       xx, g, isq, T, D, contract_Q(c_), c_.eps32);
 }
 
 Mat block::rms_bwd(const Mat& dy, const Mat& xx, const Mat& g,
                    const Mat& isq, Mat& dg) const {
   if (c_.precision != 9)
-    return core::rms_bwd<i64, __int128, core::RoundHalfAway<i64>>(
+    return core::rms_bwd<i64, __int128, core::RoundHalfAway>(
   dy, xx, g, isq, dg, c_.T, c_.D, contract_Q(c_));
-  return core::rms_bwd<i64, i64, core::RoundHalfAway<i64>>(
+  return core::rms_bwd<i64, i64, core::RoundHalfAway>(
       dy, xx, g, isq, dg, c_.T, c_.D, contract_Q(c_));
 }
 
@@ -355,9 +256,9 @@ Mat block::attn_fwd(const std::map<std::string, Mat>& w, const Mat& x,
   if (i64(x.size()) != i64(c_.T) * c_.D)
     throw std::runtime_error("intbirth: bad x shape");
   if (c_.precision != 9)
-    return core::attn_fwd<i64, __int128, core::RoundHalfAway<i64>>(
+    return core::attn_fwd<i64, __int128, core::RoundHalfAway>(
   w, x, c, make_env());
-  return core::attn_fwd<i64, i64, core::RoundHalfAway<i64>>(
+  return core::attn_fwd<i64, i64, core::RoundHalfAway>(
       w, x, c, make_env());
 }
 
@@ -365,9 +266,9 @@ Mat block::ffn_fwd(const std::map<std::string, Mat>& w, const Mat& x1,
                    block_cache& c) const {
   (void)x1;  // residual base read from c.x1 (== x1)
   if (c_.precision != 9)
-    return core::ffn_fwd<i64, __int128, core::RoundHalfAway<i64>>(
+    return core::ffn_fwd<i64, __int128, core::RoundHalfAway>(
   w, c, make_env());
-  return core::ffn_fwd<i64, i64, core::RoundHalfAway<i64>>(
+  return core::ffn_fwd<i64, i64, core::RoundHalfAway>(
       w, c, make_env());
 }
 
@@ -400,9 +301,9 @@ Mat block::moe_body_fwd(const std::map<std::string, Mat>& w,
   if (i64(w.at("wr").size()) != i64(E) * c_.D)
     throw std::runtime_error("intbirth: bad wr shape");
   if (c_.precision != 9)
-    return core::moe_body_fwd<i64, __int128, core::RoundHalfAway<i64>>(
+    return core::moe_body_fwd<i64, __int128, core::RoundHalfAway>(
   w, x, c, make_env());
-  return core::moe_body_fwd<i64, i64, core::RoundHalfAway<i64>>(
+  return core::moe_body_fwd<i64, i64, core::RoundHalfAway>(
       w, x, c, make_env());
 }
 
@@ -414,9 +315,9 @@ std::map<std::string, Mat> block::moe_body_bwd(
   if (i64(dxin.size()) != i64(c_.T) * c_.D)
     throw std::runtime_error("intbirth: bad dxin shape");
   if (c_.precision != 9)
-    return core::moe_body_bwd<i64, __int128, core::RoundHalfAway<i64>>(
+    return core::moe_body_bwd<i64, __int128, core::RoundHalfAway>(
   w, dxin, c, dx0_out, make_env());
-  return core::moe_body_bwd<i64, i64, core::RoundHalfAway<i64>>(
+  return core::moe_body_bwd<i64, i64, core::RoundHalfAway>(
       w, dxin, c, dx0_out, make_env());
 }
 
@@ -425,9 +326,9 @@ Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
   check_weights(w);
   const Mat x2 = body_fwd(w, x, c);
   if (c_.precision != 9)
-    return core::fwd_head<i64, __int128, core::RoundHalfAway<i64>>(
+    return core::fwd_head<i64, __int128, core::RoundHalfAway>(
   w, x2, c, make_env());
-  return core::fwd_head<i64, i64, core::RoundHalfAway<i64>>(
+  return core::fwd_head<i64, i64, core::RoundHalfAway>(
       w, x2, c, make_env());
 }
 
@@ -435,9 +336,9 @@ Mat block::ffn_bwd(const std::map<std::string, Mat>& w,
                    const Mat& dx2_masked, const block_cache& c,
                    std::map<std::string, Mat>& G) const {
   if (c_.precision != 9)
-    return core::ffn_bwd<i64, __int128, core::RoundHalfAway<i64>>(
+    return core::ffn_bwd<i64, __int128, core::RoundHalfAway>(
   w, dx2_masked, c, G, make_env());
-  return core::ffn_bwd<i64, i64, core::RoundHalfAway<i64>>(
+  return core::ffn_bwd<i64, i64, core::RoundHalfAway>(
       w, dx2_masked, c, G, make_env());
 }
 
@@ -445,9 +346,9 @@ Mat block::attn_bwd(const std::map<std::string, Mat>& w,
                     const Mat& dx1_masked, const block_cache& c,
                     std::map<std::string, Mat>& G) const {
   if (c_.precision != 9)
-    return core::attn_bwd<i64, __int128, core::RoundHalfAway<i64>>(
+    return core::attn_bwd<i64, __int128, core::RoundHalfAway>(
   w, dx1_masked, c, G, make_env());
-  return core::attn_bwd<i64, i64, core::RoundHalfAway<i64>>(
+  return core::attn_bwd<i64, i64, core::RoundHalfAway>(
       w, dx1_masked, c, G, make_env());
 }
 
@@ -483,9 +384,9 @@ std::map<std::string, Mat> block::bwd(
   std::map<std::string, Mat> G;
   const Mat dx2in =
       c_.precision != 9
-          ? core::bwd_head<i64, __int128, core::RoundHalfAway<i64>>(
+          ? core::bwd_head<i64, __int128, core::RoundHalfAway>(
                 w, dlogits, c, G, make_env())
-          : core::bwd_head<i64, i64, core::RoundHalfAway<i64>>(
+          : core::bwd_head<i64, i64, core::RoundHalfAway>(
                 w, dlogits, c, G, make_env());
   auto Gb = body_bwd(w, dx2in, c, dx0_out);
   for (auto& [k, g] : Gb) G[k] = std::move(g);
@@ -499,7 +400,7 @@ adamw::adamw(int shift, i64 lrn, i64 lrd, int precision)
   if (shift < 0 || lrn < 1 || lrd < 1 ||
       (precision != 9 && precision != 32))
     throw std::runtime_error("intbirth: bad adamw params");
-  p10_ = p9_ = p1000_ = p999_ = BigV{1};
+  p10_ = p9_ = p1000_ = p999_ = core::BigV{1};
 }
 
 void adamw::set_lr(i64 lrn, i64 lrd) {
@@ -522,16 +423,16 @@ void adamw::step(const std::vector<Mat*>& params,
   if (m_.size() != params.size())
     throw std::runtime_error("intbirth: param count changed");
   t_ += 1;
-  big_mul(p10_, 10);
-  big_mul(p9_, 9);
-  big_mul(p1000_, 1000);
-  big_mul(p999_, 999);
-  BigV n1 = p10_, d1 = big_sub(p10_, p9_);
-  BigV n2 = p1000_, d2 = big_sub(p1000_, p999_);
-  while (big_gt_pow30(n1)) { big_shr1(n1); big_shr1(d1); }
-  while (big_gt_pow30(n2)) { big_shr1(n2); big_shr1(d2); }
-  const i64 bc1n = big_i64(n1), bc1d = std::max<i64>(big_i64(d1), 1);
-  const i64 bc2n = big_i64(n2), bc2d = std::max<i64>(big_i64(d2), 1);
+  core::big_mul(p10_, 10);
+  core::big_mul(p9_, 9);
+  core::big_mul(p1000_, 1000);
+  core::big_mul(p999_, 999);
+  core::BigV n1 = p10_, d1 = core::big_sub(p10_, p9_);
+  core::BigV n2 = p1000_, d2 = core::big_sub(p1000_, p999_);
+  while (core::big_gt_pow30(n1)) { core::big_shr1(n1); core::big_shr1(d1); }
+  while (core::big_gt_pow30(n2)) { core::big_shr1(n2); core::big_shr1(d2); }
+  const i64 bc1n = core::big_i64(n1), bc1d = std::max<i64>(core::big_i64(d1), 1);
+  const i64 bc2n = core::big_i64(n2), bc2d = std::max<i64>(core::big_i64(d2), 1);
   i64 nz = 0, tot = 0;
   for (std::size_t j = 0; j < params.size(); j++) {
     Mat& w = *params[j];
@@ -539,12 +440,12 @@ void adamw::step(const std::vector<Mat*>& params,
     if (w.size() != g.size() || w.size() != m_[j].size())
       throw std::runtime_error("intbirth: grad shape mismatch");
     if (precision_ != 9)
-      core::adamw_update<i64, __int128, core::RoundHalfAway<i64>>(
+      core::adamw_update<i64, __int128, core::RoundHalfAway>(
           w, g, m_[j], v_[j], bc1n, bc1d, bc2n, bc2d,
           i64{1} << precision_, shift_, lrn_, lrd_, precision_ - 9,
           nz, tot);
     else
-      core::adamw_update<i64, i64, core::RoundHalfAway<i64>>(
+      core::adamw_update<i64, i64, core::RoundHalfAway>(
           w, g, m_[j], v_[j], bc1n, bc1d, bc2n, bc2d,
           i64{1} << precision_, shift_, lrn_, lrd_, precision_ - 9,
           nz, tot);
@@ -554,98 +455,61 @@ void adamw::step(const std::vector<Mat*>& params,
 
 // ------------------------------------------------------- full_birth
 
+namespace {
+core::birth_cfg_t birth_cfg(const contract& c) {
+  if (c.precision != 9 && c.precision != 32 && c.precision != 64)
+    throw std::runtime_error("intbirth: bad precision");
+  return {c.T,      c.D,  c.DH,        c.F,     c.V,
+          c.shift,  c.precision,       c.gboost, c.pq,
+          c.act_clamp, c.eps32, c.lrn, c.lrd};
+}
+}  // namespace
+
 full_birth::full_birth(const std::string& tables_bytes,
                        const std::string& init_bytes,
                        const contract& c)
-    : blk_(tables_bytes, c), opt_(c.shift, c.lrn, c.lrd, c.precision) {
-  const auto sh = shapes(c);
-  std::size_t off = 0;
-  const auto take = [&](std::size_t n) {
-    if (off + n * 8 > init_bytes.size())
-      throw std::runtime_error("intbirth: truncated init");
-    Mat m(n);
-    std::memcpy(m.data(), init_bytes.data() + off, n * 8);
-    off += n * 8;
-    return m;
-  };
-  for (const char* k : block::KEYS) {
-    const auto s = sh.at(k);
-    w_[k] = take(std::size_t(s.r) * s.c);
-  }
-  x_ = take(std::size_t(c.T) * c.D);
-  // init bytes carry x at the shipped grain; exact re-embed
-  for (auto& v : x_) v <<= (c.precision - 9);
-  tgt_ = take(std::size_t(c.T));
-  if (off != init_bytes.size())
-    throw std::runtime_error("intbirth: trailing init bytes");
-  for (const i64 t : tgt_)
-    if (t < 0 || t >= c.V)
-      throw std::runtime_error("intbirth: target out of vocab");
-  for (const char* k : block::KEYS)
-    for (auto& v : w_[k])
-      v <<= c.shift + (c.precision - 9);  // lift to Q_w at rung grain
-}
+    : impl_([&]() -> decltype(impl_) {
+        const auto bc = birth_cfg(c);
+        using RH64 = core::RoundHalfAway;
+        using RH128 = core::RoundHalfAway;
+        if (c.precision == 9)
+          return core::birth_impl<i64, i64, RH64>(tables_bytes,
+                                                  init_bytes, bc);
+        if (c.precision == 32)
+          return core::birth_impl<i64, __int128, RH64>(
+              tables_bytes, init_bytes, bc);
+        return core::birth_impl<__int128, ax::core::i256, RH128>(
+            tables_bytes, init_bytes, bc);
+      }()) {}
 
 void full_birth::run(int steps) {
-  for (int i = 0; i < steps; i++) step_once();
+  std::visit([&](auto& b) { b.run(steps); }, impl_);
 }
-
+void full_birth::set_lr(i64 lrn, i64 lrd) {
+  std::visit([&](auto& b) { b.set_lr(lrn, lrd); }, impl_);
+}
+int full_birth::step_count() const {
+  return std::visit([](const auto& b) { return b.step_count(); },
+                    impl_);
+}
+i64 full_birth::last_loss() const {
+  return std::visit([](const auto& b) { return b.last_loss(); },
+                    impl_);
+}
+double full_birth::nz_last() const {
+  return std::visit([](const auto& b) { return b.nz_last(); },
+                    impl_);
+}
 std::string full_birth::mark() {
-  for (const char* k : block::KEYS)
-    th_.update(w_.at(k).data(), w_.at(k).size() * 8);
-  return traj_sha();
+  return std::visit([](auto& b) { return b.mark(); }, impl_);
 }
-
 std::string full_birth::traj_sha() const {
-  detail::sha256 peek = th_;
-  return peek.hex();
+  return std::visit([](const auto& b) { return b.traj_sha(); },
+                    impl_);
 }
-
 std::string full_birth::weights_bytes() const {
-  std::string out;
-  for (const char* k : block::KEYS) {
-    const auto& w = w_.at(k);
-    out.append(reinterpret_cast<const char*>(w.data()), w.size() * 8);
-  }
-  return out;
-}
-
-void full_birth::step_once() {
-  const contract& c = blk_.cfg();
-  // Q-scale view of the wide weights (the matmul boundary)
-  std::map<std::string, Mat> w;
-  for (const char* k : block::KEYS) {
-    w[k] = w_.at(k);
-    for (auto& v : w[k]) v = rdiv(v, i64(1) << c.shift);
-  }
-  block_cache bc;
-  const Mat logits = blk_.fwd(w, x_, bc);
-  const i64 qc = contract_Q(c);
-  const Mat pp = blk_.softmax_rows(logits, c.T, c.V, qc);
-  i64 loss = 0;
-  for (int t = 0; t < c.T; t++)
-    loss += qc - pp[std::size_t(t) * c.V + tgt_[t]];
-  loss_ = loss;
-  Mat dlogits(std::size_t(c.T) * c.V);
-  for (int t = 0; t < c.T; t++)
-    for (int vv = 0; vv < c.V; vv++)
-      dlogits[std::size_t(t) * c.V + vv] =
-          (pp[std::size_t(t) * c.V + vv] - qc * (tgt_[t] == vv)) *
-          c.gboost;
-  auto G = blk_.bwd(w, dlogits, bc);
-  std::vector<Mat*> params;
-  std::vector<Mat> unboosted;
-  unboosted.reserve(11);
-  for (const char* k : block::KEYS) {
-    Mat g = std::move(G.at(k));
-    for (auto& v : g) v = rdiv(v, contract_Q(c) * c.gboost);  // unboost
-    unboosted.push_back(std::move(g));
-    params.push_back(&w_.at(k));
-  }
-  std::vector<const Mat*> gp;
-  for (const auto& g : unboosted) gp.push_back(&g);
-  opt_.step(params, gp);
-  step_ += 1;
+  return std::visit(
+      [](const auto& b) { return b.weights_bytes(); }, impl_);
 }
 
 // ------------------------------------------------------ multi_birth
@@ -657,7 +521,7 @@ multi_birth::multi_birth(const std::string& tables_bytes,
     : blk_(tables_bytes, c), opt_(c.shift, c.lrn, c.lrd, c.precision) {
   if (c.n_blocks < 1)
     throw std::runtime_error("intbirth: n_blocks < 1");
-  const auto sh = shapes(c);
+  const auto sh = core::shapes(c.DH, c.D, c.F, c.V);
   order_.push_back("emb");
   for (int b = 0; b < c.n_blocks; b++)
     for (const char* k : block::BODY_KEYS)
@@ -832,7 +696,7 @@ moe_birth::moe_birth(const std::string& tables_bytes,
     throw std::runtime_error("intbirth: n_blocks < 1");
   if (c.n_experts < 1)
     throw std::runtime_error("intbirth: n_experts < 1");
-  const auto sh = shapes(c);
+  const auto sh = core::shapes(c.DH, c.D, c.F, c.V);
   order_.push_back("emb");
   for (int b = 0; b < c.n_blocks; b++) {
     const std::string bp = "b" + std::to_string(b) + ".";

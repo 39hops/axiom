@@ -157,6 +157,14 @@ struct i256 {
     return 0;
   }
 
+  /** explicit so accidental narrowing can't happen silently; the
+      intbirth core's checked narrow<> is the intended path. */
+  explicit operator __int128() const { return to_i128(); }
+  explicit operator long long() const {
+    const __int128 v = to_i128();
+    return (long long)(v);
+  }
+
   __int128 to_i128() const {
     const std::uint64_t ext = negative() ? ~0ull : 0ull;
     if (l[2] != ext || l[3] != ext ||

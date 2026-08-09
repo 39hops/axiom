@@ -100,10 +100,11 @@ TEST(IntbirthLadder, Q32LossDeShiftTracksQ9) {
   ib::full_birth f9(tb, in, c9), f32(tb, in, c32);
   f9.run(1);
   f32.run(1);
-  // same trajectory at two grains: de-shifted step-1 loss agrees to
-  // within rounding-grain slack (loss is T * (Q - p[tgt]) ~ T*Q).
+  // same trajectory at two grains: last_loss() reports at the
+  // shipped grain at every rung (declared de-grain), so step-1
+  // losses agree to within rounding-grain slack.
   const i64 l9 = f9.last_loss();
-  const i64 l32 = f32.last_loss() >> 23;
+  const i64 l32 = f32.last_loss();
   EXPECT_NEAR(double(l9), double(l32), double(l9) * 0.02 + 4.0);
 }
 
@@ -123,4 +124,25 @@ TEST(IntbirthLadder, UnwiredPrecisionStillRefuses) {
   const auto c = tiny_contract(48);
   EXPECT_THROW(ib::full_birth(tiny_tables(c), tiny_init(c), c),
                std::runtime_error);
+}
+
+TEST(IntbirthLadder, Q64AcceptedRunsDeterministicAndTracksQ9) {
+  const auto c9 = tiny_contract(9), c64 = tiny_contract(64);
+  const std::string tb = tiny_tables(c9), in = tiny_init(c9);
+  ib::full_birth f9(tb, in, c9), fa(tb, in, c64), fb(tb, in, c64);
+  f9.run(1);
+  fa.run(1);
+  fb.run(1);
+  EXPECT_EQ(fa.mark(), fb.mark());
+  EXPECT_NEAR(double(f9.last_loss()), double(fa.last_loss()),
+              double(f9.last_loss()) * 0.02 + 4.0);
+}
+
+TEST(IntbirthLadder, Q64ReferenceDigest) {
+  // Pinned Q64 rung reference (40 steps, i128 weights serialized
+  // 16-byte LE). Self-referenced until llmopt counter-books.
+  const auto c = tiny_contract(64);
+  ib::full_birth fb(tiny_tables(c), tiny_init(c), c);
+  fb.run(40);
+  EXPECT_EQ(fb.mark(), "92134da77f8b189c44016419b70494cfa90ccb1a3523a9fba4906065236fe05f");
 }
