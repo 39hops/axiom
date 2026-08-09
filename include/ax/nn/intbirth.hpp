@@ -21,7 +21,11 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <variant>
 #include <vector>
+
+#include <ax/core/int256.hpp>
+#include <ax/nn/intbirth_core.hpp>
 
 namespace ax::nn::ib {
 
@@ -71,18 +75,16 @@ struct contract {
   i64 act_clamp = 16384;      // residual clamp, Q units
   i64 eps32 = 42950;          // rmsnorm eps at 2^32
   i64 lrn = 1, lrd = 1000;    // lr = lrn/lrd
+  int precision = 9;          // operand grain Q_p = 2^precision
+                              // (ENGINE-EXACT-1 ladder; 9 = shipped)
 };
 
-/** Forward activations/masks the backward needs; opaque to Python. */
-struct block_cache {
-  Mat x, h1, i1, q0, k0, v0, qr, kr, p, a, m1, x1, h2, i2, gp, u, sg,
-      f, m2, x2, h3, i3;
-  // gravmoe MoE fields: router logits/probs, top-1 choice + prob,
-  // and the SELECTED expert's FFN intermediates laid out [T,*]
-  // (row t holds expert top[t]'s values)
-  Mat r, pr, top_p, egp, eu, esg, ef, eout;
-  std::vector<int> top;
-};
+/** Operand grain from the contract (ENGINE-EXACT-1 ladder). */
+inline i64 contract_Q(const contract& c) { return i64{1} << c.precision; }
+
+/** Forward activations/masks the backward needs; opaque to Python.
+    (The i64 instantiation of the ENGINE-EXACT-1 templated cache.) */
+using block_cache = core::cache_t<i64>;
 
 /** The R2b block: fwd/bwd/softmax over Q-scale weights (KEYS-order
     names). Holds the parsed shipped tables; stateless otherwise. */
@@ -148,6 +150,10 @@ class block {
                const Mat& dx1_masked, const block_cache& c,
                std::map<std::string, Mat>& G) const;
 
+  /** Bundle the core-template environment (dims, frozen carries,
+      rung constants, table pointers) for delegation. */
+  core::env<i64> make_env() const;
+
   contract c_;
   i64 scale_ = 0, ts_ = 0, tse_ = 0;
   std::map<std::string, Mat> tab_;
@@ -157,7 +163,9 @@ class block {
     correction, decoupled decay. State keyed by parameter index. */
 class adamw {
  public:
-  adamw(int shift, i64 lrn, i64 lrd);
+  /** precision: operand grain exponent (ENGINE-EXACT-1 ladder;
+      9 = shipped, the default keeps the old 3-arg signature). */
+  adamw(int shift, i64 lrn, i64 lrd, int precision = 9);
   /** One step over parallel param/grad lists; params (Q_w scale)
       are updated in place. Grads at the unboosted Q scale. */
   void step(const std::vector<Mat*>& params,
@@ -171,6 +179,7 @@ class adamw {
 
  private:
   int shift_, t_ = 0;
+  int precision_ = 9;
   i64 lrn_, lrd_;
   double nz_ = 0;
   std::vector<Mat> m_, v_;
@@ -189,10 +198,11 @@ class full_birth {
 
   void run(int steps);              ///< advance n training steps
   /** Schedule point: lr = lrn/lrd for subsequent steps. */
-  void set_lr(i64 lrn, i64 lrd) { opt_.set_lr(lrn, lrd); }
-  int step_count() const { return step_; }
-  i64 last_loss() const { return loss_; }
-  double nz_last() const { return opt_.nz_last(); }
+  void set_lr(i64 lrn, i64 lrd);
+  int step_count() const;
+  /** milestone loss (de-grained to shipped scale above Q9) */
+  i64 last_loss() const;
+  double nz_last() const;
 
   /** Feed the current wide weights (KEYS order) into the running
       trajectory hash — the milestone protocol — and return its
@@ -200,18 +210,23 @@ class full_birth {
   std::string mark();
   /** Current running trajectory digest without marking. */
   std::string traj_sha() const;
-  /** Wide (Q_w-scale) weights, KEYS order, int64 LE. */
+  /** Wide (Q_w-scale) weights, KEYS order, native-width LE
+      (8 bytes at Q9/Q32, 16 at Q64). */
   std::string weights_bytes() const;
+  /** Weights floored to the shipped grain (declared de-grain),
+      KEYS order, int64 LE — the cross-rung divergence view. */
+  std::string weights_grain9_bytes() const;
 
  private:
-  void step_once();
-  block blk_;
-  adamw opt_;
-  int step_ = 0;
-  i64 loss_ = 0;
-  std::map<std::string, Mat> w_;   // wide, Q_w scale
-  std::vector<i64> x_, tgt_;
-  detail::sha256 th_;
+  // ENGINE-EXACT-1: one loop template, three wired rungs. The Q9
+  // alternative is digest-gated bit-identical to the pre-ladder
+  // class; Q64 exists only on this dense path (multi/moe <= Q32).
+  std::variant<
+      core::birth_impl<i64, i64, core::RoundHalfAway>,
+      core::birth_impl<i64, __int128, core::RoundHalfAway>,
+      core::birth_impl<__int128, ax::core::i256,
+                       core::RoundHalfAway>>
+      impl_;
 };
 
 /** The multi-block composed loop (mb spec: emb -> Body x n_blocks

@@ -19,6 +19,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <ax/nn/exact_anchor.hpp>
 #include <ax/nn/intbirth.hpp>
 
 #include <cstring>
@@ -66,6 +67,8 @@ contract contract_from_dict(const py::dict& d) {
   c.eps32 = getl("EPS32", c.eps32);
   c.lrn = getl("LRN", c.lrn);
   c.lrd = getl("LRD", c.lrd);
+  // ENGINE-EXACT-1 ladder rung (default 9 = shipped, bit-identical)
+  c.precision = geti("PRECISION", c.precision);
   return c;
 }
 
@@ -341,9 +344,50 @@ PYBIND11_MODULE(intbirth, m) {
            [](const full_birth& fb) {
              return py::bytes(fb.weights_bytes());
            })
+      .def("weights_grain9_bytes",
+           [](const full_birth& fb) {
+             return py::bytes(fb.weights_grain9_bytes());
+           },
+           "weights floored to the shipped grain, KEYS order, i64 "
+           "LE - the cross-rung divergence view")
       .def_property_readonly("step_count", &full_birth::step_count)
       .def_property_readonly("loss", &full_birth::last_loss)
       .def_property_readonly("nz", &full_birth::nz_last);
+
+  using ax::nn::ib::anchor::anchor_birth;
+  using ax::nn::ib::anchor::exr;
+  py::class_<anchor_birth>(m, "ExactAnchor",
+      "ENGINE-EXACT-1 exact-prefix anchor: zero value-rounding, "
+      "frozen-grain seams, loud bit-ceiling abort")
+      .def(py::init([](const py::bytes& tables, const py::bytes& init,
+                       const py::dict& c) {
+             const auto cc = contract_from_dict(c);
+             ax::nn::ib::core::birth_cfg_t bc{
+                 cc.T,     cc.D,        cc.DH,    cc.F,  cc.V,
+                 cc.shift, 9,           cc.gboost, cc.pq,
+                 cc.act_clamp, cc.eps32, cc.lrn,  cc.lrd};
+             return new anchor_birth(std::string(tables),
+                                     std::string(init), bc);
+           }),
+           py::arg("tables_bytes"), py::arg("init_bytes"),
+           py::arg("contract"))
+      .def("run", &anchor_birth::run, py::arg("steps"),
+           py::call_guard<py::gil_scoped_release>())
+      .def("mark", &anchor_birth::mark)
+      .def("traj_sha", &anchor_birth::traj_sha)
+      .def("weights_grain9_bytes",
+           [](const anchor_birth& a) {
+             const auto g9 = a.weights_grain9();
+             return py::bytes(std::string(
+                 reinterpret_cast<const char*>(g9.data()),
+                 g9.size() * 8));
+           })
+      .def_property_readonly("step_count", &anchor_birth::step_count)
+      .def_property_readonly("loss", &anchor_birth::last_loss)
+      .def_static("set_bit_ceiling",
+                  [](unsigned bits) { exr::bit_ceiling = bits; })
+      .def_static("get_bit_ceiling",
+                  []() { return exr::bit_ceiling; });
 
   py::class_<multi_birth>(m, "MultiBirth")
       .def(py::init([](const py::bytes& tables, const py::bytes& init,

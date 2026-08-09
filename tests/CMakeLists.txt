@@ -10,6 +10,7 @@ add_executable(ax_tests
   smoke_test.cpp
   par/pool_test.cpp
   core/bigint_basic_test.cpp
+  core/int256_test.cpp
   core/bigint_addsub_test.cpp
   core/bigint_mul_test.cpp
   core/bigint_div_test.cpp
@@ -55,6 +56,10 @@ add_executable(ax_tests
   sym/risch_test.cpp
   nn/model_test.cpp
   nn/exact_test.cpp
+  nn/intbirth_test.cpp
+  nn/intbirth_core_test.cpp
+  nn/intbirth_ladder_test.cpp
+  nn/exact_anchor_test.cpp
   mathgen/series_chain_test.cpp
   mathgen/domain_chain_test.cpp
   pyrand/pyrand_test.cpp
