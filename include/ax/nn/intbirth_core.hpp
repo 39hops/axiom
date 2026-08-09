@@ -14,10 +14,50 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace ax::nn::ib::core {
+
+/** Forward activations/masks the backward needs (templated on the
+    operand scalar; the shipped block_cache is cache_t<i64>). */
+template <class Op>
+struct cache_t {
+  using V = std::vector<Op>;
+  // i1/i2/i3 are rmsnorm isq values: fixed 2^32 scale at every rung
+  // (see rms_fwd), so they stay i64 for any Op.
+  V x, h1, q0, k0, v0, qr, kr, p, a, m1, x1, h2, gp, u, sg,
+      f, m2, x2, h3;
+  std::vector<std::int64_t> i1, i2, i3;
+  // gravmoe MoE fields: router logits/probs, top-1 choice + prob,
+  // and the SELECTED expert's FFN intermediates laid out [T,*]
+  V r, pr, top_p, egp, eu, esg, ef, eout;
+  std::vector<int> top;
+};
+
+/** Everything a core block function needs beyond its operands:
+    dims, frozen carries (i64 by the convention pin), rung-scaled
+    constants (Op), and the shipped tables (i64 at shipped scale).
+    Built once per call by the delegating shipped class. */
+template <class Op>
+struct env {
+  int T, D, DH, F, V, E;
+  std::int64_t PQ;    // attention-prob carry (frozen)
+  Op CL;              // act_clamp at rung scale
+  Op Q;               // operand grain 2^precision
+  Op scale;           // attn scale: isqrt_round(Q9^2*DH) << gshift
+  std::int64_t eps32;  // rmsnorm eps at fixed 2^32 scale (no shift)
+  std::int64_t ts, tse;
+  const std::vector<std::int64_t>*tcos, *tsin, *sil, *dsl, *ex;
+  int gshift;
+};
+
+template <class Op>
+inline Op clampi(Op x, Op lo, Op hi) {
+  return x < lo ? lo : (x > hi ? hi : x);
+}
 
 /** Round-half-away division at grain d (the program-wide rdiv),
     plus the frozen-grain seam helpers (spec §Convention pin):
@@ -238,6 +278,129 @@ std::vector<Op> rms_bwd(const std::vector<Op>& dy,
     }
   }
   return dx;
+}
+
+// ---- attention (verbatim moves from intbirth.cpp; the RoPE and
+// exp tables stay i64 at shipped scale — Round policy handles the
+// grain seams; RS is a frozen carry).
+
+/** RoPE rotate fwd/bwd over [T, DH]; sign=+1 fwd, -1 bwd. */
+template <class Op, class Acc, class Round>
+std::vector<Op> rope_apply(const std::vector<Op>& v, int T, int DH,
+                           const std::vector<std::int64_t>& tcos,
+                           const std::vector<std::int64_t>& tsin,
+                           int sign) {
+  constexpr std::int64_t RS = std::int64_t{1} << 14;
+  const int half = DH / 2;
+  std::vector<Op> y(std::size_t(T) * DH);
+  for (int t = 0; t < T; t++)
+    for (int i = 0; i < half; i++) {
+      const Acc co = Acc(tcos[std::size_t(t) * half + i]);
+      const Acc si = Acc(tsin[std::size_t(t) * half + i]) * sign;
+      const Acc a = Acc(v[std::size_t(t) * DH + i]);
+      const Acc b = Acc(v[std::size_t(t) * DH + half + i]);
+      y[std::size_t(t) * DH + i] =
+          narrow<Op, Acc>(Round::div(a * co - b * si, Acc(RS)));
+      y[std::size_t(t) * DH + half + i] =
+          narrow<Op, Acc>(Round::div(a * si + b * co, Acc(RS)));
+    }
+  return y;
+}
+
+template <class Op, class Acc, class Round>
+std::vector<Op> attn_fwd(const std::map<std::string, std::vector<Op>>& w,
+                         const std::vector<Op>& x, cache_t<Op>& c,
+                         const env<Op>& e) {
+  const int T = e.T, D = e.D, DH = e.DH;
+  c.x = x;
+  c.h1 = rms_fwd<Op, Acc, Round>(x, w.at("g1"), c.i1, T, D, e.Q,
+                                 e.eps32);
+  c.q0 = gemm<Op, Acc>(c.h1, T, D, w.at("wq"), DH);
+  c.k0 = gemm<Op, Acc>(c.h1, T, D, w.at("wk"), DH);
+  c.v0 = gemm<Op, Acc>(c.h1, T, D, w.at("wv"), DH);
+  rdiv_inplace<Op, Round>(c.q0, e.Q);
+  rdiv_inplace<Op, Round>(c.k0, e.Q);
+  rdiv_inplace<Op, Round>(c.v0, e.Q);
+  c.qr = rope_apply<Op, Acc, Round>(c.q0, T, DH, *e.tcos, *e.tsin, 1);
+  c.kr = rope_apply<Op, Acc, Round>(c.k0, T, DH, *e.tcos, *e.tsin, 1);
+  std::vector<Op> s = gemm<Op, Acc>(c.qr, T, DH, c.kr, T);
+  rdiv_inplace<Op, Round>(s, e.scale);
+  const Op floor_v = Round::from_grain(Op(-(std::int64_t{1} << 40)),
+                                       e.gshift);
+  for (int t = 0; t < T; t++)
+    for (int u = t + 1; u < T; u++)
+      s[std::size_t(t) * T + u] = floor_v;  // causal
+  c.p = softmax_rows<Op, Acc, Round>(s, T, T, e.PQ, *e.ex, e.tse,
+                                     e.gshift);
+  c.a = gemm_nt<Op, Acc>(c.p, T, T, c.v0, DH);
+  rdiv_inplace<Op, Round>(c.a, Op(e.PQ));
+  std::vector<Op> pre1 = gemm<Op, Acc>(c.a, T, DH, w.at("wo"), D);
+  rdiv_inplace<Op, Round>(pre1, e.Q);
+  c.m1.assign(pre1.size(), 0);
+  c.x1.assign(pre1.size(), 0);
+  for (std::size_t i = 0; i < pre1.size(); i++) {
+    pre1[i] += x[i];
+    c.m1[i] = (pre1[i] <= e.CL && pre1[i] >= -e.CL);
+    c.x1[i] = clampi<Op>(pre1[i], -e.CL, e.CL);
+  }
+  return c.x1;
+}
+
+template <class Op, class Acc, class Round>
+std::vector<Op> attn_bwd(const std::map<std::string, std::vector<Op>>& w,
+                         const std::vector<Op>& dx1_masked,
+                         const cache_t<Op>& c,
+                         std::map<std::string, std::vector<Op>>& G,
+                         const env<Op>& e) {
+  using Vec = std::vector<Op>;
+  const int T = e.T, D = e.D, DH = e.DH;
+  const Op PQ = Op(e.PQ);
+  const Vec& dx1 = dx1_masked;
+  Vec da = gemm_nt<Op, Acc>(dx1, T, D, w.at("wo"), DH);
+  rdiv_inplace<Op, Round>(da, e.Q);
+  G["wo"] = gemm_xty<Op, Acc>(dx1, T, D, c.a, DH);
+  rdiv_inplace<Op, Round>(G["wo"], e.Q);
+  Vec dp = gemm<Op, Acc>(da, T, DH, c.v0, T);
+  rdiv_inplace<Op, Round>(dp, e.Q);
+  Vec dv = gemm_xty<Op, Acc>(c.p, T, T, da, DH);
+  rdiv_inplace<Op, Round>(dv, PQ);
+  Vec ds(std::size_t(T) * T);
+  for (int t = 0; t < T; t++) {
+    Acc inner = 0;
+    for (int cc = 0; cc < T; cc++)
+      inner += Acc(mul_rdiv<Op, Acc, Round>(
+          c.p[std::size_t(t) * T + cc], dp[std::size_t(t) * T + cc],
+          PQ));
+    for (int cc = 0; cc < T; cc++)
+      ds[std::size_t(t) * T + cc] = narrow<Op, Acc>(Round::div(
+          Acc(c.p[std::size_t(t) * T + cc]) *
+              (Acc(dp[std::size_t(t) * T + cc]) - inner),
+          Acc(PQ)));
+  }
+  Vec dqr = gemm_nt<Op, Acc>(ds, T, T, c.kr, DH);
+  rdiv_inplace<Op, Round>(dqr, e.scale);
+  Vec dkr = gemm_xty<Op, Acc>(ds, T, T, c.qr, DH);
+  rdiv_inplace<Op, Round>(dkr, e.scale);
+  const Vec dq =
+      rope_apply<Op, Acc, Round>(dqr, T, DH, *e.tcos, *e.tsin, -1);
+  const Vec dk =
+      rope_apply<Op, Acc, Round>(dkr, T, DH, *e.tcos, *e.tsin, -1);
+  G["wq"] = gemm_xty<Op, Acc>(dq, T, DH, c.h1, D);
+  rdiv_inplace<Op, Round>(G["wq"], e.Q);
+  G["wk"] = gemm_xty<Op, Acc>(dk, T, DH, c.h1, D);
+  rdiv_inplace<Op, Round>(G["wk"], e.Q);
+  G["wv"] = gemm_xty<Op, Acc>(dv, T, DH, c.h1, D);
+  rdiv_inplace<Op, Round>(G["wv"], e.Q);
+  Vec dh1 = gemm_nt<Op, Acc>(dq, T, DH, w.at("wq"), D);
+  {
+    const Vec t2 = gemm_nt<Op, Acc>(dk, T, DH, w.at("wk"), D);
+    const Vec t3 = gemm_nt<Op, Acc>(dv, T, DH, w.at("wv"), D);
+    for (std::size_t i = 0; i < dh1.size(); i++)
+      dh1[i] += t2[i] + t3[i];
+  }
+  rdiv_inplace<Op, Round>(dh1, e.Q);  // one rdiv after the 3-term sum
+  return rms_bwd<Op, Acc, Round>(dh1, c.x, w.at("g1"), c.i1, G["g1"],
+                                 T, D, e.Q);
 }
 
 }  // namespace ax::nn::ib::core

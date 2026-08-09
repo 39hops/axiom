@@ -23,6 +23,8 @@
 #include <string>
 #include <vector>
 
+#include <ax/nn/intbirth_core.hpp>
+
 namespace ax::nn::ib {
 
 using i64 = std::int64_t;
@@ -78,16 +80,9 @@ struct contract {
 /** Operand grain from the contract (ENGINE-EXACT-1 ladder). */
 inline i64 contract_Q(const contract& c) { return i64{1} << c.precision; }
 
-/** Forward activations/masks the backward needs; opaque to Python. */
-struct block_cache {
-  Mat x, h1, i1, q0, k0, v0, qr, kr, p, a, m1, x1, h2, i2, gp, u, sg,
-      f, m2, x2, h3, i3;
-  // gravmoe MoE fields: router logits/probs, top-1 choice + prob,
-  // and the SELECTED expert's FFN intermediates laid out [T,*]
-  // (row t holds expert top[t]'s values)
-  Mat r, pr, top_p, egp, eu, esg, ef, eout;
-  std::vector<int> top;
-};
+/** Forward activations/masks the backward needs; opaque to Python.
+    (The i64 instantiation of the ENGINE-EXACT-1 templated cache.) */
+using block_cache = core::cache_t<i64>;
 
 /** The R2b block: fwd/bwd/softmax over Q-scale weights (KEYS-order
     names). Holds the parsed shipped tables; stateless otherwise. */
@@ -152,6 +147,10 @@ class block {
   Mat attn_bwd(const std::map<std::string, Mat>& w,
                const Mat& dx1_masked, const block_cache& c,
                std::map<std::string, Mat>& G) const;
+
+  /** Bundle the core-template environment (dims, frozen carries,
+      rung constants, table pointers) for delegation. */
+  core::env<i64> make_env() const;
 
   contract c_;
   i64 scale_ = 0, ts_ = 0, tse_ = 0;

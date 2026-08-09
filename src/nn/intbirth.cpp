@@ -321,57 +321,29 @@ Mat block::rms_bwd(const Mat& dy, const Mat& xx, const Mat& g,
       dy, xx, g, isq, dg, c_.T, c_.D, contract_Q(c_));
 }
 
+core::env<i64> block::make_env() const {
+  core::env<i64> e;
+  e.T = c_.T; e.D = c_.D; e.DH = c_.DH; e.F = c_.F; e.V = c_.V;
+  e.E = c_.n_experts;
+  e.PQ = c_.pq;
+  e.CL = c_.act_clamp;
+  e.Q = contract_Q(c_);
+  e.scale = scale_;
+  e.eps32 = c_.eps32;
+  e.ts = ts_; e.tse = tse_;
+  e.tcos = &tab_.at("rope.cos"); e.tsin = &tab_.at("rope.sin");
+  e.sil = &tab_.at("silu.tab"); e.dsl = &tab_.at("dsilu.tab");
+  e.ex = &tab_.at("exp.tab");
+  e.gshift = c_.precision - 9;
+  return e;
+}
+
 Mat block::attn_fwd(const std::map<std::string, Mat>& w, const Mat& x,
                     block_cache& c) const {
-  const int T = c_.T, D = c_.D, DH = c_.DH;
-  const i64 PQ = c_.pq, CL = c_.act_clamp;
-  if (i64(x.size()) != i64(T) * D)
+  if (i64(x.size()) != i64(c_.T) * c_.D)
     throw std::runtime_error("intbirth: bad x shape");
-  const Mat& tcos = tab_.at("rope.cos");
-  const Mat& tsin = tab_.at("rope.sin");
-  const int half = DH / 2;
-  const auto rope_f = [&](const Mat& v) {
-    Mat y(std::size_t(T) * DH);
-    for (int t = 0; t < T; t++)
-      for (int i = 0; i < half; i++) {
-        const i64 co = tcos[std::size_t(t) * half + i];
-        const i64 si = tsin[std::size_t(t) * half + i];
-        const i64 a = v[std::size_t(t) * DH + i];
-        const i64 b = v[std::size_t(t) * DH + half + i];
-        y[std::size_t(t) * DH + i] = rdiv(a * co - b * si, RS);
-        y[std::size_t(t) * DH + half + i] = rdiv(a * si + b * co, RS);
-      }
-    return y;
-  };
-
-  c.x = x;
-  c.h1 = rms_fwd(x, w.at("g1"), c.i1);
-  c.q0 = int_gemm(c.h1, T, D, w.at("wq"), DH);
-  c.k0 = int_gemm(c.h1, T, D, w.at("wk"), DH);
-  c.v0 = int_gemm(c.h1, T, D, w.at("wv"), DH);
-  rdiv_inplace(c.q0, Q);
-  rdiv_inplace(c.k0, Q);
-  rdiv_inplace(c.v0, Q);
-  c.qr = rope_f(c.q0);
-  c.kr = rope_f(c.k0);
-  Mat s = int_gemm(c.qr, T, DH, c.kr, T);
-  rdiv_inplace(s, scale_);
-  for (int t = 0; t < T; t++)
-    for (int u = t + 1; u < T; u++)
-      s[std::size_t(t) * T + u] = -(i64(1) << 40);  // causal
-  c.p = softmax_rows(s, T, T, PQ);
-  c.a = int_gemm_nt(c.p, T, T, c.v0, DH);
-  rdiv_inplace(c.a, PQ);
-  Mat pre1 = int_gemm(c.a, T, DH, w.at("wo"), D);
-  rdiv_inplace(pre1, Q);
-  c.m1.assign(pre1.size(), 0);
-  c.x1.assign(pre1.size(), 0);
-  for (std::size_t i = 0; i < pre1.size(); i++) {
-    pre1[i] += x[i];
-    c.m1[i] = (pre1[i] <= CL && pre1[i] >= -CL);
-    c.x1[i] = clampi(pre1[i], -CL, CL);
-  }
-  return c.x1;
+  return core::attn_fwd<i64, i64, core::RoundHalfAway<i64>>(
+      w, x, c, make_env());
 }
 
 Mat block::ffn_fwd(const std::map<std::string, Mat>& w, const Mat& x1,
@@ -679,67 +651,8 @@ Mat block::ffn_bwd(const std::map<std::string, Mat>& w,
 Mat block::attn_bwd(const std::map<std::string, Mat>& w,
                     const Mat& dx1_masked, const block_cache& c,
                     std::map<std::string, Mat>& G) const {
-  const int T = c_.T, D = c_.D, DH = c_.DH;
-  const i64 PQ = c_.pq;
-  const Mat& dx1 = dx1_masked;
-  const Mat& tcos = tab_.at("rope.cos");
-  const Mat& tsin = tab_.at("rope.sin");
-  const int half = DH / 2;
-  const auto rope_b = [&](const Mat& dx) {
-    Mat y(std::size_t(T) * DH);
-    for (int t = 0; t < T; t++)
-      for (int i = 0; i < half; i++) {
-        const i64 co = tcos[std::size_t(t) * half + i];
-        const i64 si = tsin[std::size_t(t) * half + i];
-        const i64 a = dx[std::size_t(t) * DH + i];
-        const i64 b = dx[std::size_t(t) * DH + half + i];
-        y[std::size_t(t) * DH + i] = rdiv(a * co + b * si, RS);
-        y[std::size_t(t) * DH + half + i] =
-            rdiv(-a * si + b * co, RS);
-      }
-    return y;
-  };
-  Mat da = int_gemm_nt(dx1, T, D, w.at("wo"), DH);
-  rdiv_inplace(da, Q);
-  G["wo"] = int_gemm_xty(dx1, T, D, c.a, DH);
-  rdiv_inplace(G["wo"], Q);
-  Mat dp = int_gemm(da, T, DH, c.v0, T);
-  rdiv_inplace(dp, Q);
-  Mat dv = int_gemm_xty(c.p, T, T, da, DH);
-  rdiv_inplace(dv, PQ);
-  Mat ds(std::size_t(T) * T);
-  for (int t = 0; t < T; t++) {
-    i64 inner = 0;
-    for (int cc = 0; cc < T; cc++)
-      inner += rdiv(
-          c.p[std::size_t(t) * T + cc] * dp[std::size_t(t) * T + cc],
-          PQ);
-    for (int cc = 0; cc < T; cc++)
-      ds[std::size_t(t) * T + cc] =
-          rdiv(c.p[std::size_t(t) * T + cc] *
-                   (dp[std::size_t(t) * T + cc] - inner),
-               PQ);
-  }
-  Mat dqr = int_gemm_nt(ds, T, T, c.kr, DH);
-  rdiv_inplace(dqr, scale_);
-  Mat dkr = int_gemm_xty(ds, T, T, c.qr, DH);
-  rdiv_inplace(dkr, scale_);
-  const Mat dq = rope_b(dqr), dk = rope_b(dkr);
-  G["wq"] = int_gemm_xty(dq, T, DH, c.h1, D);
-  rdiv_inplace(G["wq"], Q);
-  G["wk"] = int_gemm_xty(dk, T, DH, c.h1, D);
-  rdiv_inplace(G["wk"], Q);
-  G["wv"] = int_gemm_xty(dv, T, DH, c.h1, D);
-  rdiv_inplace(G["wv"], Q);
-  Mat dh1 = int_gemm_nt(dq, T, DH, w.at("wq"), D);
-  {
-    const Mat t2 = int_gemm_nt(dk, T, DH, w.at("wk"), D);
-    const Mat t3 = int_gemm_nt(dv, T, DH, w.at("wv"), D);
-    for (std::size_t i = 0; i < dh1.size(); i++)
-      dh1[i] += t2[i] + t3[i];
-  }
-  rdiv_inplace(dh1, Q);  // one rdiv after the three-term sum
-  return rms_bwd(dh1, c.x, w.at("g1"), c.i1, G["g1"]);
+  return core::attn_bwd<i64, i64, core::RoundHalfAway<i64>>(
+      w, dx1_masked, c, G, make_env());
 }
 
 std::map<std::string, Mat> block::body_bwd(
