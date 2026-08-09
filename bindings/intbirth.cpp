@@ -66,6 +66,8 @@ contract contract_from_dict(const py::dict& d) {
   c.eps32 = getl("EPS32", c.eps32);
   c.lrn = getl("LRN", c.lrn);
   c.lrd = getl("LRD", c.lrd);
+  // ENGINE-EXACT-1 ladder rung (default 9 = shipped, bit-identical)
+  c.precision = geti("PRECISION", c.precision);
   return c;
 }
 

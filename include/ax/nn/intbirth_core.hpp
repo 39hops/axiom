@@ -381,26 +381,31 @@ std::vector<Op> attn_fwd(const std::map<std::string, std::vector<Op>>& w,
   c.x = x;
   c.h1 = rms_fwd<Op, Acc, Round>(x, w.at("g1"), c.i1, T, D, e.Q,
                                  e.eps32);
-  c.q0 = gemm<Op, Acc>(c.h1, T, D, w.at("wq"), DH);
-  c.k0 = gemm<Op, Acc>(c.h1, T, D, w.at("wk"), DH);
-  c.v0 = gemm<Op, Acc>(c.h1, T, D, w.at("wv"), DH);
-  rdiv_inplace<Op, Round>(c.q0, e.Q);
-  rdiv_inplace<Op, Round>(c.k0, e.Q);
-  rdiv_inplace<Op, Round>(c.v0, e.Q);
+  c.q0 = finalize_rdiv<Op, Acc, Round>(
+      gemm_acc<Op, Acc>(c.h1, T, D, w.at("wq"), DH), Acc(e.Q));
+  c.k0 = finalize_rdiv<Op, Acc, Round>(
+      gemm_acc<Op, Acc>(c.h1, T, D, w.at("wk"), DH), Acc(e.Q));
+  c.v0 = finalize_rdiv<Op, Acc, Round>(
+      gemm_acc<Op, Acc>(c.h1, T, D, w.at("wv"), DH), Acc(e.Q));
   c.qr = rope_apply<Op, Acc, Round>(c.q0, T, DH, *e.tcos, *e.tsin, 1);
   c.kr = rope_apply<Op, Acc, Round>(c.k0, T, DH, *e.tcos, *e.tsin, 1);
-  std::vector<Op> s = gemm<Op, Acc>(c.qr, T, DH, c.kr, T);
-  rdiv_inplace<Op, Round>(s, e.scale);
-  const Op floor_v = Round::from_grain(Op(-(std::int64_t{1} << 40)),
-                                       e.gshift);
+  std::vector<Op> s = finalize_rdiv<Op, Acc, Round>(
+      gemm_acc<Op, Acc>(c.qr, T, DH, c.kr, T), Acc(e.scale));
+  // Causal floor: -(2^40) re-embedded to rung scale, CAPPED at the
+  // operand width (40 + 23 would overflow i64 at Q32). The cap is
+  // semantics-preserving: any value below every real logit floors
+  // the softmax index to e = 0 identically. Declared convention.
+  const int fbits =
+      std::min(40 + e.gshift, int(sizeof(Op)) * 8 - 2);
+  const Op floor_v = -(Op(1) << fbits);
   for (int t = 0; t < T; t++)
     for (int u = t + 1; u < T; u++)
       s[std::size_t(t) * T + u] = floor_v;  // causal
   c.p = softmax_rows<Op>(s, T, T, e.PQ, *e.ex, e.tse, e.gshift);
-  c.a = gemm_nt<Op, Acc>(c.p, T, T, c.v0, DH);
-  rdiv_inplace<Op, Round>(c.a, Op(e.PQ));
-  std::vector<Op> pre1 = gemm<Op, Acc>(c.a, T, DH, w.at("wo"), D);
-  rdiv_inplace<Op, Round>(pre1, e.Q);
+  c.a = finalize_rdiv<Op, Acc, Round>(
+      gemm_nt_acc<Op, Acc>(c.p, T, T, c.v0, DH), Acc(e.PQ));
+  std::vector<Op> pre1 = finalize_rdiv<Op, Acc, Round>(
+      gemm_acc<Op, Acc>(c.a, T, DH, w.at("wo"), D), Acc(e.Q));
   c.m1.assign(pre1.size(), 0);
   c.x1.assign(pre1.size(), 0);
   for (std::size_t i = 0; i < pre1.size(); i++) {
@@ -421,14 +426,14 @@ std::vector<Op> attn_bwd(const std::map<std::string, std::vector<Op>>& w,
   const int T = e.T, D = e.D, DH = e.DH;
   const Op PQ = Op(e.PQ);
   const Vec& dx1 = dx1_masked;
-  Vec da = gemm_nt<Op, Acc>(dx1, T, D, w.at("wo"), DH);
-  rdiv_inplace<Op, Round>(da, e.Q);
-  G["wo"] = gemm_xty<Op, Acc>(dx1, T, D, c.a, DH);
-  rdiv_inplace<Op, Round>(G["wo"], e.Q);
-  Vec dp = gemm<Op, Acc>(da, T, DH, c.v0, T);
-  rdiv_inplace<Op, Round>(dp, e.Q);
-  Vec dv = gemm_xty<Op, Acc>(c.p, T, T, da, DH);
-  rdiv_inplace<Op, Round>(dv, PQ);
+  Vec da = finalize_rdiv<Op, Acc, Round>(
+      gemm_nt_acc<Op, Acc>(dx1, T, D, w.at("wo"), DH), Acc(e.Q));
+  G["wo"] = finalize_rdiv<Op, Acc, Round>(
+      gemm_xty_acc<Op, Acc>(dx1, T, D, c.a, DH), Acc(e.Q));
+  Vec dp = finalize_rdiv<Op, Acc, Round>(
+      gemm_acc<Op, Acc>(da, T, DH, c.v0, T), Acc(e.Q));
+  Vec dv = finalize_rdiv<Op, Acc, Round>(
+      gemm_xty_acc<Op, Acc>(c.p, T, T, da, DH), Acc(PQ));
   Vec ds(std::size_t(T) * T);
   for (int t = 0; t < T; t++) {
     Acc inner = 0;
@@ -442,28 +447,31 @@ std::vector<Op> attn_bwd(const std::map<std::string, std::vector<Op>>& w,
               (Acc(dp[std::size_t(t) * T + cc]) - inner),
           Acc(PQ)));
   }
-  Vec dqr = gemm_nt<Op, Acc>(ds, T, T, c.kr, DH);
-  rdiv_inplace<Op, Round>(dqr, e.scale);
-  Vec dkr = gemm_xty<Op, Acc>(ds, T, T, c.qr, DH);
-  rdiv_inplace<Op, Round>(dkr, e.scale);
+  Vec dqr = finalize_rdiv<Op, Acc, Round>(
+      gemm_nt_acc<Op, Acc>(ds, T, T, c.kr, DH), Acc(e.scale));
+  Vec dkr = finalize_rdiv<Op, Acc, Round>(
+      gemm_xty_acc<Op, Acc>(ds, T, T, c.qr, DH), Acc(e.scale));
   const Vec dq =
       rope_apply<Op, Acc, Round>(dqr, T, DH, *e.tcos, *e.tsin, -1);
   const Vec dk =
       rope_apply<Op, Acc, Round>(dkr, T, DH, *e.tcos, *e.tsin, -1);
-  G["wq"] = gemm_xty<Op, Acc>(dq, T, DH, c.h1, D);
-  rdiv_inplace<Op, Round>(G["wq"], e.Q);
-  G["wk"] = gemm_xty<Op, Acc>(dk, T, DH, c.h1, D);
-  rdiv_inplace<Op, Round>(G["wk"], e.Q);
-  G["wv"] = gemm_xty<Op, Acc>(dv, T, DH, c.h1, D);
-  rdiv_inplace<Op, Round>(G["wv"], e.Q);
-  Vec dh1 = gemm_nt<Op, Acc>(dq, T, DH, w.at("wq"), D);
+  G["wq"] = finalize_rdiv<Op, Acc, Round>(
+      gemm_xty_acc<Op, Acc>(dq, T, DH, c.h1, D), Acc(e.Q));
+  G["wk"] = finalize_rdiv<Op, Acc, Round>(
+      gemm_xty_acc<Op, Acc>(dk, T, DH, c.h1, D), Acc(e.Q));
+  G["wv"] = finalize_rdiv<Op, Acc, Round>(
+      gemm_xty_acc<Op, Acc>(dv, T, DH, c.h1, D), Acc(e.Q));
+  std::vector<Acc> dh1a = gemm_nt_acc<Op, Acc>(dq, T, DH, w.at("wq"), D);
   {
-    const Vec t2 = gemm_nt<Op, Acc>(dk, T, DH, w.at("wk"), D);
-    const Vec t3 = gemm_nt<Op, Acc>(dv, T, DH, w.at("wv"), D);
-    for (std::size_t i = 0; i < dh1.size(); i++)
-      dh1[i] += t2[i] + t3[i];
+    const std::vector<Acc> t2 =
+        gemm_nt_acc<Op, Acc>(dk, T, DH, w.at("wk"), D);
+    const std::vector<Acc> t3 =
+        gemm_nt_acc<Op, Acc>(dv, T, DH, w.at("wv"), D);
+    for (std::size_t i = 0; i < dh1a.size(); i++)
+      dh1a[i] += t2[i] + t3[i];
   }
-  rdiv_inplace<Op, Round>(dh1, e.Q);  // one rdiv after the 3-term sum
+  // one rdiv after the 3-term sum (placement contract)
+  const Vec dh1 = finalize_rdiv<Op, Acc, Round>(dh1a, Acc(e.Q));
   return rms_bwd<Op, Acc, Round>(dh1, c.x, w.at("g1"), c.i1, G["g1"],
                                  T, D, e.Q);
 }

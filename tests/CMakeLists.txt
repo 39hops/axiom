@@ -57,6 +57,7 @@ add_executable(ax_tests
   nn/exact_test.cpp
   nn/intbirth_test.cpp
   nn/intbirth_core_test.cpp
+  nn/intbirth_ladder_test.cpp
   mathgen/series_chain_test.cpp
   mathgen/domain_chain_test.cpp
   pyrand/pyrand_test.cpp

@@ -259,17 +259,19 @@ block::block(const std::string& tables_bytes, const contract& c)
       c_.V <= 0 || c_.DH % 2 || c_.shift < 0 || c_.gboost < 1 ||
       c_.pq < 1 || c_.act_clamp < 1 || c_.lrd < 1)
     throw std::runtime_error("intbirth: bad contract");
-  // ENGINE-EXACT-1 ladder: only the shipped grain is wired so far;
-  // an unwired precision aborts here, before any step runs
-  // (refuse-if-disagree). Every loop builds a block, so this one
-  // check gates full_birth/multi_birth/moe_birth too.
-  if (c_.precision != 9)
+  // ENGINE-EXACT-1 ladder: wired rungs only; an unwired precision
+  // aborts here, before any step runs (refuse-if-disagree). Every
+  // loop builds a block, so this one check gates the loops too.
+  if (c_.precision != 9 && c_.precision != 32)
     throw std::runtime_error("intbirth: bad precision");
   // eps32 >= 1 makes rmsnorm isq >= 1 structural: rms_bwd divides
   // by isq, and m40 >= eps32 in rms_fwd is the only floor.
   if (c_.eps32 < 1)
     throw std::runtime_error("intbirth: bad eps32");
-  scale_ = isqrt_round(Q * Q * i64(c_.DH));
+  // Frozen-grain attn scale: floor-isqrt does not commute with
+  // *4^k, so the shipped-grain isqrt is computed first and then
+  // re-embedded (declared convention; no-op at precision 9).
+  scale_ = isqrt_round(Q * Q * i64(c_.DH)) << (c_.precision - 9);
   tab_ = parse_axp3(tables_bytes);
   for (const char* k : {"silu.tab", "dsilu.tab", "exp.tab",
                         "rope.cos", "rope.sin"})
@@ -315,12 +317,18 @@ Mat block::rms_fwd(const Mat& xx, const Mat& g, Mat& isq) const {
   const int T = c_.T, D = c_.D;
   if (i64(xx.size()) != i64(T) * D || i64(g.size()) != D)
     throw std::runtime_error("intbirth: rms_fwd shape");
+  if (c_.precision != 9)
+    return core::rms_fwd<i64, __int128, core::RoundHalfAway<i64>>(
+  xx, g, isq, T, D, contract_Q(c_), c_.eps32);
   return core::rms_fwd<i64, i64, core::RoundHalfAway<i64>>(
       xx, g, isq, T, D, contract_Q(c_), c_.eps32);
 }
 
 Mat block::rms_bwd(const Mat& dy, const Mat& xx, const Mat& g,
                    const Mat& isq, Mat& dg) const {
+  if (c_.precision != 9)
+    return core::rms_bwd<i64, __int128, core::RoundHalfAway<i64>>(
+  dy, xx, g, isq, dg, c_.T, c_.D, contract_Q(c_));
   return core::rms_bwd<i64, i64, core::RoundHalfAway<i64>>(
       dy, xx, g, isq, dg, c_.T, c_.D, contract_Q(c_));
 }
@@ -329,8 +337,8 @@ core::env<i64> block::make_env() const {
   core::env<i64> e;
   e.T = c_.T; e.D = c_.D; e.DH = c_.DH; e.F = c_.F; e.V = c_.V;
   e.E = c_.n_experts;
-  e.PQ = c_.pq;
-  e.CL = c_.act_clamp;
+  e.PQ = c_.pq;                                 // frozen carry
+  e.CL = c_.act_clamp << (c_.precision - 9);    // operand scale
   e.Q = contract_Q(c_);
   e.scale = scale_;
   e.eps32 = c_.eps32;
@@ -346,6 +354,9 @@ Mat block::attn_fwd(const std::map<std::string, Mat>& w, const Mat& x,
                     block_cache& c) const {
   if (i64(x.size()) != i64(c_.T) * c_.D)
     throw std::runtime_error("intbirth: bad x shape");
+  if (c_.precision != 9)
+    return core::attn_fwd<i64, __int128, core::RoundHalfAway<i64>>(
+  w, x, c, make_env());
   return core::attn_fwd<i64, i64, core::RoundHalfAway<i64>>(
       w, x, c, make_env());
 }
@@ -353,6 +364,9 @@ Mat block::attn_fwd(const std::map<std::string, Mat>& w, const Mat& x,
 Mat block::ffn_fwd(const std::map<std::string, Mat>& w, const Mat& x1,
                    block_cache& c) const {
   (void)x1;  // residual base read from c.x1 (== x1)
+  if (c_.precision != 9)
+    return core::ffn_fwd<i64, __int128, core::RoundHalfAway<i64>>(
+  w, c, make_env());
   return core::ffn_fwd<i64, i64, core::RoundHalfAway<i64>>(
       w, c, make_env());
 }
@@ -385,6 +399,9 @@ Mat block::moe_body_fwd(const std::map<std::string, Mat>& w,
       throw std::runtime_error("intbirth: missing " + k);
   if (i64(w.at("wr").size()) != i64(E) * c_.D)
     throw std::runtime_error("intbirth: bad wr shape");
+  if (c_.precision != 9)
+    return core::moe_body_fwd<i64, __int128, core::RoundHalfAway<i64>>(
+  w, x, c, make_env());
   return core::moe_body_fwd<i64, i64, core::RoundHalfAway<i64>>(
       w, x, c, make_env());
 }
@@ -396,6 +413,9 @@ std::map<std::string, Mat> block::moe_body_bwd(
   if (E < 1) throw std::runtime_error("intbirth: E < 1");
   if (i64(dxin.size()) != i64(c_.T) * c_.D)
     throw std::runtime_error("intbirth: bad dxin shape");
+  if (c_.precision != 9)
+    return core::moe_body_bwd<i64, __int128, core::RoundHalfAway<i64>>(
+  w, dxin, c, dx0_out, make_env());
   return core::moe_body_bwd<i64, i64, core::RoundHalfAway<i64>>(
       w, dxin, c, dx0_out, make_env());
 }
@@ -404,6 +424,9 @@ Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
                block_cache& c) const {
   check_weights(w);
   const Mat x2 = body_fwd(w, x, c);
+  if (c_.precision != 9)
+    return core::fwd_head<i64, __int128, core::RoundHalfAway<i64>>(
+  w, x2, c, make_env());
   return core::fwd_head<i64, i64, core::RoundHalfAway<i64>>(
       w, x2, c, make_env());
 }
@@ -411,6 +434,9 @@ Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
 Mat block::ffn_bwd(const std::map<std::string, Mat>& w,
                    const Mat& dx2_masked, const block_cache& c,
                    std::map<std::string, Mat>& G) const {
+  if (c_.precision != 9)
+    return core::ffn_bwd<i64, __int128, core::RoundHalfAway<i64>>(
+  w, dx2_masked, c, G, make_env());
   return core::ffn_bwd<i64, i64, core::RoundHalfAway<i64>>(
       w, dx2_masked, c, G, make_env());
 }
@@ -418,6 +444,9 @@ Mat block::ffn_bwd(const std::map<std::string, Mat>& w,
 Mat block::attn_bwd(const std::map<std::string, Mat>& w,
                     const Mat& dx1_masked, const block_cache& c,
                     std::map<std::string, Mat>& G) const {
+  if (c_.precision != 9)
+    return core::attn_bwd<i64, __int128, core::RoundHalfAway<i64>>(
+  w, dx1_masked, c, G, make_env());
   return core::attn_bwd<i64, i64, core::RoundHalfAway<i64>>(
       w, dx1_masked, c, G, make_env());
 }
@@ -453,8 +482,11 @@ std::map<std::string, Mat> block::bwd(
     throw std::runtime_error("intbirth: bad dlogits shape");
   std::map<std::string, Mat> G;
   const Mat dx2in =
-      core::bwd_head<i64, i64, core::RoundHalfAway<i64>>(
-          w, dlogits, c, G, make_env());
+      c_.precision != 9
+          ? core::bwd_head<i64, __int128, core::RoundHalfAway<i64>>(
+                w, dlogits, c, G, make_env())
+          : core::bwd_head<i64, i64, core::RoundHalfAway<i64>>(
+                w, dlogits, c, G, make_env());
   auto Gb = body_bwd(w, dx2in, c, dx0_out);
   for (auto& [k, g] : Gb) G[k] = std::move(g);
   return G;
@@ -464,7 +496,8 @@ std::map<std::string, Mat> block::bwd(
 
 adamw::adamw(int shift, i64 lrn, i64 lrd, int precision)
     : shift_(shift), precision_(precision), lrn_(lrn), lrd_(lrd) {
-  if (shift < 0 || lrn < 1 || lrd < 1 || precision != 9)
+  if (shift < 0 || lrn < 1 || lrd < 1 ||
+      (precision != 9 && precision != 32))
     throw std::runtime_error("intbirth: bad adamw params");
   p10_ = p9_ = p1000_ = p999_ = BigV{1};
 }
@@ -505,10 +538,16 @@ void adamw::step(const std::vector<Mat*>& params,
     const Mat& g = *grads[j];
     if (w.size() != g.size() || w.size() != m_[j].size())
       throw std::runtime_error("intbirth: grad shape mismatch");
-    core::adamw_update<i64, i64, core::RoundHalfAway<i64>>(
-        w, g, m_[j], v_[j], bc1n, bc1d, bc2n, bc2d,
-        i64{1} << precision_, shift_, lrn_, lrd_, precision_ - 9,
-        nz, tot);
+    if (precision_ != 9)
+      core::adamw_update<i64, __int128, core::RoundHalfAway<i64>>(
+          w, g, m_[j], v_[j], bc1n, bc1d, bc2n, bc2d,
+          i64{1} << precision_, shift_, lrn_, lrd_, precision_ - 9,
+          nz, tot);
+    else
+      core::adamw_update<i64, i64, core::RoundHalfAway<i64>>(
+          w, g, m_[j], v_[j], bc1n, bc1d, bc2n, bc2d,
+          i64{1} << precision_, shift_, lrn_, lrd_, precision_ - 9,
+          nz, tot);
   }
   nz_ = double(nz) / double(tot);
 }
@@ -534,6 +573,8 @@ full_birth::full_birth(const std::string& tables_bytes,
     w_[k] = take(std::size_t(s.r) * s.c);
   }
   x_ = take(std::size_t(c.T) * c.D);
+  // init bytes carry x at the shipped grain; exact re-embed
+  for (auto& v : x_) v <<= (c.precision - 9);
   tgt_ = take(std::size_t(c.T));
   if (off != init_bytes.size())
     throw std::runtime_error("intbirth: trailing init bytes");
@@ -541,7 +582,8 @@ full_birth::full_birth(const std::string& tables_bytes,
     if (t < 0 || t >= c.V)
       throw std::runtime_error("intbirth: target out of vocab");
   for (const char* k : block::KEYS)
-    for (auto& v : w_[k]) v <<= c.shift;  // lift to Q_w
+    for (auto& v : w_[k])
+      v <<= c.shift + (c.precision - 9);  // lift to Q_w at rung grain
 }
 
 void full_birth::run(int steps) {
@@ -578,16 +620,17 @@ void full_birth::step_once() {
   }
   block_cache bc;
   const Mat logits = blk_.fwd(w, x_, bc);
-  const Mat pp = blk_.softmax_rows(logits, c.T, c.V, Q);
+  const i64 qc = contract_Q(c);
+  const Mat pp = blk_.softmax_rows(logits, c.T, c.V, qc);
   i64 loss = 0;
   for (int t = 0; t < c.T; t++)
-    loss += Q - pp[std::size_t(t) * c.V + tgt_[t]];
+    loss += qc - pp[std::size_t(t) * c.V + tgt_[t]];
   loss_ = loss;
   Mat dlogits(std::size_t(c.T) * c.V);
   for (int t = 0; t < c.T; t++)
     for (int vv = 0; vv < c.V; vv++)
       dlogits[std::size_t(t) * c.V + vv] =
-          (pp[std::size_t(t) * c.V + vv] - Q * (tgt_[t] == vv)) *
+          (pp[std::size_t(t) * c.V + vv] - qc * (tgt_[t] == vv)) *
           c.gboost;
   auto G = blk_.bwd(w, dlogits, bc);
   std::vector<Mat*> params;
@@ -595,7 +638,7 @@ void full_birth::step_once() {
   unboosted.reserve(11);
   for (const char* k : block::KEYS) {
     Mat g = std::move(G.at(k));
-    for (auto& v : g) v = rdiv(v, Q * c.gboost);  // unboost
+    for (auto& v : g) v = rdiv(v, contract_Q(c) * c.gboost);  // unboost
     unboosted.push_back(std::move(g));
     params.push_back(&w_.at(k));
   }
@@ -666,7 +709,8 @@ multi_birth::multi_birth(const std::string& tables_bytes,
       if (t < 0 || t >= c.V)
         throw std::runtime_error("intbirth: target out of vocab");
   for (const auto& name : order_)
-    for (auto& v : w_[name]) v <<= c.shift;  // lift to Q_w
+    for (auto& v : w_[name])
+      v <<= c.shift + (c.precision - 9);  // lift to Q_w at rung grain
 }
 
 void multi_birth::run(int steps) {
@@ -725,16 +769,17 @@ void multi_birth::step_once() {
   rdiv_inplace(logits, Q);
 
   // ---- loss + CE gradient (boosted)
-  const Mat pp = blk_.softmax_rows(logits, T, V, Q);
+  const i64 qc = contract_Q(c);
+  const Mat pp = blk_.softmax_rows(logits, T, V, qc);
   i64 loss = 0;
   for (int t = 0; t < T; t++)
-    loss += Q - pp[std::size_t(t) * V + tgt_[t]];
+    loss += qc - pp[std::size_t(t) * V + tgt_[t]];
   loss_ = loss;
   Mat dlogits(std::size_t(T) * V);
   for (int t = 0; t < T; t++)
     for (int vv = 0; vv < V; vv++)
       dlogits[std::size_t(t) * V + vv] =
-          (pp[std::size_t(t) * V + vv] - Q * (tgt_[t] == vv)) *
+          (pp[std::size_t(t) * V + vv] - qc * (tgt_[t] == vv)) *
           c.gboost;
 
   // ---- backward
@@ -767,7 +812,7 @@ void multi_birth::step_once() {
   unboosted.reserve(order_.size());
   for (const auto& name : order_) {
     Mat g = std::move(G.at(name));
-    for (auto& v : g) v = rdiv(v, Q * c.gboost);  // unboost
+    for (auto& v : g) v = rdiv(v, contract_Q(c) * c.gboost);  // unboost
     unboosted.push_back(std::move(g));
     params.push_back(&w_.at(name));
   }
@@ -846,7 +891,8 @@ moe_birth::moe_birth(const std::string& tables_bytes,
       if (t < 0 || t >= c.V)
         throw std::runtime_error("intbirth: target out of vocab");
   for (const auto& name : order_)
-    for (auto& v : w_[name]) v <<= c.shift;  // lift to Q_w
+    for (auto& v : w_[name])
+      v <<= c.shift + (c.precision - 9);  // lift to Q_w at rung grain
 }
 
 void moe_birth::run(int steps) {
@@ -913,16 +959,17 @@ void moe_birth::step_once() {
   rdiv_inplace(logits, Q);
 
   // ---- loss + CE gradient (boosted at GB)
-  const Mat pp = blk_.softmax_rows(logits, T, V, Q);
+  const i64 qc = contract_Q(c);
+  const Mat pp = blk_.softmax_rows(logits, T, V, qc);
   i64 loss = 0;
   for (int t = 0; t < T; t++)
-    loss += Q - pp[std::size_t(t) * V + tgt[t]];
+    loss += qc - pp[std::size_t(t) * V + tgt[t]];
   loss_ = loss;
   Mat dlogits(std::size_t(T) * V);
   for (int t = 0; t < T; t++)
     for (int vv = 0; vv < V; vv++)
       dlogits[std::size_t(t) * V + vv] =
-          (pp[std::size_t(t) * V + vv] - Q * (tgt[t] == vv)) * gb;
+          (pp[std::size_t(t) * V + vv] - qc * (tgt[t] == vv)) * gb;
 
   // ---- backward
   std::map<std::string, Mat> G;
