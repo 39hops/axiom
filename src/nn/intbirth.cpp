@@ -429,8 +429,8 @@ void adamw::step(const std::vector<Mat*>& params,
   core::big_mul(p999_, 999);
   core::BigV n1 = p10_, d1 = core::big_sub(p10_, p9_);
   core::BigV n2 = p1000_, d2 = core::big_sub(p1000_, p999_);
-  while (core::big_gt_pow30(n1)) { core::big_shr1(n1); core::big_shr1(d1); }
-  while (core::big_gt_pow30(n2)) { core::big_shr1(n2); core::big_shr1(d2); }
+  core::big_norm30(n1, d1);
+  core::big_norm30(n2, d2);
   const i64 bc1n = core::big_i64(n1), bc1d = std::max<i64>(core::big_i64(d1), 1);
   const i64 bc2n = core::big_i64(n2), bc2d = std::max<i64>(core::big_i64(d2), 1);
   i64 nz = 0, tot = 0;

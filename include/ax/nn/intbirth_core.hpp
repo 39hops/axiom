@@ -88,6 +88,18 @@ inline void big_shr1(BigV& d) {
   }
   big_trim(d);
 }
+inline void big_shr(BigV& d, int k) {  // floor shift right by k bits
+  if (k <= 0) return;
+  const int limb = k / 32, bit = k % 32;
+  const std::size_t n = d.size();
+  for (std::size_t i = 0; i < n; i++) {
+    const std::size_t s = i + std::size_t(limb);
+    std::uint64_t v = (s < n) ? (d[s] >> bit) : 0;
+    if (bit && s + 1 < n) v |= std::uint64_t(d[s + 1]) << (32 - bit);
+    d[i] = std::uint32_t(v);
+  }
+  big_trim(d);
+}
 inline bool big_gt_pow30(const BigV& d) {  // strictly greater than 2^30
   const int b = big_bits(d);
   if (b != 31) return b > 31;
@@ -97,6 +109,19 @@ inline std::int64_t big_i64(const BigV& d) {
   std::uint64_t v = 0;
   for (std::size_t i = d.size(); i-- > 0;) v = (v << 32) | d[i];
   return std::int64_t(v);
+}
+/** bias-correction normalization: floor-shift n (and d in lockstep)
+    right until n <= 2^30. One multi-limb shift then at most a step
+    or two of the strict-compare loop — bit-identical to the former
+    one-bit-at-a-time loop (floor shifts compose:
+    floor(floor(x/2^a)/2^b) == floor(x/2^(a+b))), which cost
+    O(bits^2) PER STEP once beta^t grew (~10 bits/step for the v
+    moment): the ENGINE-SCALE-1 grid measured 2.7 -> 8.8 -> ~102
+    ms/step at s1000/s4000/s16000 from exactly this loop. */
+inline void big_norm30(BigV& n, BigV& d) {
+  const int k = big_bits(n) - 31;
+  if (k > 0) { big_shr(n, k); big_shr(d, k); }
+  while (big_gt_pow30(n)) { big_shr1(n); big_shr1(d); }
 }
 inline BigV big_sub(const BigV& a, const BigV& b) {  // a >= b
   BigV r(a.size(), 0);
@@ -1282,8 +1307,8 @@ class birth_impl {
     big_mul(p1000_, 1000); big_mul(p999_, 999);
     BigV n1 = p10_, d1 = big_sub(p10_, p9_);
     BigV n2 = p1000_, d2 = big_sub(p1000_, p999_);
-    while (big_gt_pow30(n1)) { big_shr1(n1); big_shr1(d1); }
-    while (big_gt_pow30(n2)) { big_shr1(n2); big_shr1(d2); }
+    big_norm30(n1, d1);
+    big_norm30(n2, d2);
     const std::int64_t bc1n = big_i64(n1);
     const std::int64_t bc1d = std::max<std::int64_t>(big_i64(d1), 1);
     const std::int64_t bc2n = big_i64(n2);
