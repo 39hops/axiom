@@ -88,11 +88,31 @@ unchanged — that is the ladder's own no-op gate.
 ## Anchor implementation
 
 The same templated core instantiated with a slow, obviously-correct
-scalar: a dyadic type (arbitrary-precision numerator, power-of-2
-exponent, on ax::core bigint) and the `Exact` rounding policy — same
-frozen-grain conventions, same rounding placement *sites*, but the
-round-at-grain step replaced by exact arithmetic. Budget guard: abort loudly if any scalar exceeds a declared
-bit ceiling (default 2^22 bits) — expected horizon 8–12 steps at d64.
+scalar and the `Exact` rounding policy — same frozen-grain
+conventions, same rounding placement *sites*, but the round-at-grain
+step replaced by exact arithmetic. Budget guard: abort loudly if any
+scalar exceeds a declared bit ceiling (default 2^22 bits).
+
+BUILD CORRECTIONS (as-implemented, 2026-08-08 night):
+
+- The scalar is a full **rational** (`ax::rational` on bigint), NOT
+  dyadic as first drafted: AdamW divides by 10/1000/100000, which
+  leaves the dyadic domain. (`include/ax/nn/exact_anchor.hpp`.)
+- eps32 does NOT scale with the rung: the rms `/(Q*Q)` normalization
+  pins the isqrt input at fixed 2^32 scale at every grain.
+- Causal floor convention: `-2^min(40+gshift, Op_bits-2)` — the
+  naive re-embed overflows i64 at Q32; the cap is
+  semantics-preserving (anything below every real logit floors the
+  softmax term to 0) and bit-identical at Q9 (digest-gated).
+- Rounding-policy division is width-generic (template members): a
+  policy typed on the operand silently pre-narrowed wide
+  accumulators before dividing on the builtin rungs; i256 caught it
+  at compile time.
+- Q64 scope: the dense composed loop (`full_birth`) only; multi/moe
+  are wired through Q32. No registered rung needs Q64 MoE.
+- Anchor wall-clock reality: step 2 is already minutes-class at toy
+  size (d=8) — the measured d64 horizon is booked in the build
+  relay, not predicted here.
 
 ## Deliverables and books
 
