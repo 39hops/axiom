@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <type_traits>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -190,6 +191,13 @@ struct RoundHalfAway {
   static T from_grain(T x, int gshift) {  // exact re-embed
     return gshift ? (x << gshift) : x;
   }
+  /** the engine's plain truncating division sites (isqrt-input
+      prep in rmsnorm); the exact policy divides exactly instead —
+      the subsequent declared floor is the only quantization. */
+  template <class T>
+  static T div_trunc(T a, T b) {
+    return a / b;
+  }
 };
 
 /** Acc -> Op, loud on overflow (never wrap; refuse-if-disagree). */
@@ -244,7 +252,7 @@ std::vector<Op> gemm_xty(const std::vector<Op>& x, int rows, int K,
   for (int t = 0; t < rows; t++)
     for (int k = 0; k < K; k++) {
       const Op xv = x[std::size_t(t) * K + k];
-      if (!xv) continue;
+      if (xv == Op(0)) continue;
       for (int n = 0; n < N; n++)
         o[std::size_t(k) * N + n] +=
             Acc(xv) * Acc(y[std::size_t(t) * N + n]);
@@ -300,7 +308,7 @@ std::vector<Acc> gemm_xty_acc(const std::vector<Op>& x, int rows,
   for (int t = 0; t < rows; t++)
     for (int k = 0; k < K; k++) {
       const Op xv = x[std::size_t(t) * K + k];
-      if (!xv) continue;
+      if (xv == Op(0)) continue;
       for (int n = 0; n < N; n++)
         o[std::size_t(k) * N + n] +=
             Acc(xv) * Acc(y[std::size_t(t) * N + n]);
@@ -355,7 +363,7 @@ inline std::int64_t isqrt_round(std::int64_t n) {
     the e*scale product runs wide in Acc. Row sums of the output are
     NOT exactly `scale` (per-element rounding, no residual
     assignment) — nothing downstream may assume it. */
-template <class Op, class Acc, class Round = RoundHalfAway>
+template <class Op, class Acc, class Round>
 std::vector<Op> softmax_rows(const std::vector<Op>& s, int rows,
                              int C, Op scale,
                              const std::vector<std::int64_t>& ex,
@@ -401,8 +409,9 @@ std::vector<Op> rms_fwd(const std::vector<Op>& xx,
       s2 += Acc(v) * Acc(v);
     }
     const i64 m40 =
-        narrow<i64, Acc>(((s2 / D) * (Acc(1) << 32)) /
-                         (Acc(Q) * Acc(Q))) +
+        narrow<i64, Acc>(Round::div_trunc(
+            Round::div_trunc(s2, Acc(D)) * (Acc(1) << 32),
+            Acc(Q) * Acc(Q))) +
         eps32;
     isq[t] = isqrt_newton(m40);
     for (int d = 0; d < D; d++)
@@ -511,8 +520,8 @@ std::vector<Op> attn_fwd(const std::map<std::string, std::vector<Op>>& w,
   for (int t = 0; t < T; t++)
     for (int u = t + 1; u < T; u++)
       s[std::size_t(t) * T + u] = floor_v;  // causal
-  c.p = softmax_rows<Op, Acc>(s, T, T, Op(e.PQ), *e.ex, e.tse,
-                            e.gshift);
+  c.p = softmax_rows<Op, Acc, Round>(s, T, T, Op(e.PQ), *e.ex,
+                                     e.tse, e.gshift);
   c.a = finalize_rdiv<Op, Acc, Round>(
       gemm_nt_acc<Op, Acc>(c.p, T, T, c.v0, DH), Acc(e.PQ));
   std::vector<Op> pre1 = finalize_rdiv<Op, Acc, Round>(
@@ -691,8 +700,8 @@ std::vector<Op> moe_body_fwd(
   // lowest expert index wins ties (strict > scanning upward)
   c.r = finalize_rdiv<Op, Acc, Round>(
       gemm_acc<Op, Acc>(c.h2, T, D, w.at("wr"), E), Acc(e.Q));
-  c.pr = softmax_rows<Op, Acc>(c.r, T, E, Op(e.PQ), *e.ex,
-                             e.tse, e.gshift);
+  c.pr = softmax_rows<Op, Acc, Round>(c.r, T, E, Op(e.PQ), *e.ex,
+                                      e.tse, e.gshift);
   c.top.assign(T, 0);
   c.top_p.assign(T, 0);
   for (int t = 0; t < T; t++) {
@@ -1171,8 +1180,15 @@ class birth_impl {
   double nz_last() const { return nz_; }
 
   std::string mark() {
-    for (const char* k : BIRTH_KEYS)
-      th_.update(w_.at(k).data(), w_.at(k).size() * sizeof(Op));
+    if constexpr (std::is_trivially_copyable_v<Op>) {
+      for (const char* k : BIRTH_KEYS)
+        th_.update(w_.at(k).data(), w_.at(k).size() * sizeof(Op));
+    } else {
+      // non-POD scalar (the exact anchor): the DECLARED digest view
+      // is the floor-to-shipped-grain i64 weights
+      const auto g9 = weights_grain9();
+      th_.update(g9.data(), g9.size() * 8);
+    }
     return traj_sha();
   }
   std::string traj_sha() const {
@@ -1181,10 +1197,16 @@ class birth_impl {
   }
   std::string weights_bytes() const {
     std::string out;
-    for (const char* k : BIRTH_KEYS) {
-      const auto& w = w_.at(k);
-      out.append(reinterpret_cast<const char*>(w.data()),
-                 w.size() * sizeof(Op));
+    if constexpr (std::is_trivially_copyable_v<Op>) {
+      for (const char* k : BIRTH_KEYS) {
+        const auto& w = w_.at(k);
+        out.append(reinterpret_cast<const char*>(w.data()),
+                   w.size() * sizeof(Op));
+      }
+    } else {
+      const auto g9 = weights_grain9();
+      out.append(reinterpret_cast<const char*>(g9.data()),
+                 g9.size() * 8);
     }
     return out;
   }
@@ -1230,8 +1252,8 @@ class birth_impl {
     attn_fwd<Op, Acc, Round>(w, x_, bc, e);   // fills bc.x .. bc.x1
     const Vec x2 = ffn_fwd<Op, Acc, Round>(w, bc, e);
     const Vec logits = fwd_head<Op, Acc, Round>(w, x2, bc, e);
-    const Vec pp = softmax_rows<Op, Acc>(logits, c_.T, c_.V, qc,
-                                         *e.ex, tse_, e.gshift);
+    const Vec pp = softmax_rows<Op, Acc, Round>(
+        logits, c_.T, c_.V, qc, *e.ex, tse_, e.gshift);
     Op loss = 0;
     for (int t = 0; t < c_.T; t++)
       loss += qc - pp[std::size_t(t) * c_.V + tgt_[t]];
