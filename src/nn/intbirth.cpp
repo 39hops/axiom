@@ -2,6 +2,7 @@
     Primitive layer (int_gemm / block / adamw) + the composed
     full_birth; certified by the r2b_ref.json milestone digests. */
 #include <ax/nn/intbirth.hpp>
+#include <ax/nn/intbirth_core.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -231,41 +232,16 @@ std::string sha256::hex() {
 // ---------------------------------------------------- int_gemm forms
 
 Mat int_gemm(const Mat& a, int rows, int K, const Mat& w, int N) {
-  Mat y(std::size_t(rows) * N);
-  for (int t = 0; t < rows; t++)
-    for (int n = 0; n < N; n++) {
-      i64 acc = 0;
-      const i64* ar = &a[std::size_t(t) * K];
-      const i64* wr = &w[std::size_t(n) * K];
-      for (int k = 0; k < K; k++) acc += ar[k] * wr[k];
-      y[std::size_t(t) * N + n] = acc;
-    }
-  return y;
+  return core::gemm<i64, i64>(a, rows, K, w, N);
 }
 Mat int_gemm_nt(const Mat& a, int rows, int K, const Mat& w, int N) {
-  Mat y(std::size_t(rows) * N);
-  for (int t = 0; t < rows; t++)
-    for (int n = 0; n < N; n++) {
-      i64 acc = 0;
-      for (int k = 0; k < K; k++)
-        acc += a[std::size_t(t) * K + k] * w[std::size_t(k) * N + n];
-      y[std::size_t(t) * N + n] = acc;
-    }
-  return y;
+  return core::gemm_nt<i64, i64>(a, rows, K, w, N);
 }
 Mat int_gemm_xty(const Mat& x, int rows, int K, const Mat& y, int N) {
-  Mat o(std::size_t(K) * N, 0);
-  for (int t = 0; t < rows; t++)
-    for (int k = 0; k < K; k++) {
-      const i64 xv = x[std::size_t(t) * K + k];
-      if (!xv) continue;
-      for (int n = 0; n < N; n++)
-        o[std::size_t(k) * N + n] += xv * y[std::size_t(t) * N + n];
-    }
-  return o;
+  return core::gemm_xty<i64, i64>(x, rows, K, y, N);
 }
 void rdiv_inplace(Mat& m, i64 d) {
-  for (auto& v : m) v = rdiv(v, d);
+  core::rdiv_inplace<i64, core::RoundHalfAway<i64>>(m, d);
 }
 
 // ------------------------------------------------------------ block
