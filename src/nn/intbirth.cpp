@@ -283,6 +283,12 @@ block::block(const std::string& tables_bytes, const contract& c)
       c_.V <= 0 || c_.DH % 2 || c_.shift < 0 || c_.gboost < 1 ||
       c_.pq < 1 || c_.act_clamp < 1 || c_.lrd < 1)
     throw std::runtime_error("intbirth: bad contract");
+  // ENGINE-EXACT-1 ladder: only the shipped grain is wired so far;
+  // an unwired precision aborts here, before any step runs
+  // (refuse-if-disagree). Every loop builds a block, so this one
+  // check gates full_birth/multi_birth/moe_birth too.
+  if (c_.precision != 9)
+    throw std::runtime_error("intbirth: bad precision");
   scale_ = isqrt_round(Q * Q * i64(c_.DH));
   tab_ = parse_axp3(tables_bytes);
   for (const char* k : {"silu.tab", "dsilu.tab", "exp.tab",

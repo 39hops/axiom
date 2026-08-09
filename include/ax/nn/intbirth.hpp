@@ -71,7 +71,12 @@ struct contract {
   i64 act_clamp = 16384;      // residual clamp, Q units
   i64 eps32 = 42950;          // rmsnorm eps at 2^32
   i64 lrn = 1, lrd = 1000;    // lr = lrn/lrd
+  int precision = 9;          // operand grain Q_p = 2^precision
+                              // (ENGINE-EXACT-1 ladder; 9 = shipped)
 };
+
+/** Operand grain from the contract (ENGINE-EXACT-1 ladder). */
+inline i64 contract_Q(const contract& c) { return i64{1} << c.precision; }
 
 /** Forward activations/masks the backward needs; opaque to Python. */
 struct block_cache {
