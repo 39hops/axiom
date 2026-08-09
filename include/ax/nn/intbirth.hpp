@@ -161,7 +161,9 @@ class block {
     correction, decoupled decay. State keyed by parameter index. */
 class adamw {
  public:
-  adamw(int shift, i64 lrn, i64 lrd);
+  /** precision: operand grain exponent (ENGINE-EXACT-1 ladder;
+      9 = shipped, the default keeps the old 3-arg signature). */
+  adamw(int shift, i64 lrn, i64 lrd, int precision = 9);
   /** One step over parallel param/grad lists; params (Q_w scale)
       are updated in place. Grads at the unboosted Q scale. */
   void step(const std::vector<Mat*>& params,
@@ -175,6 +177,7 @@ class adamw {
 
  private:
   int shift_, t_ = 0;
+  int precision_ = 9;
   i64 lrn_, lrd_;
   double nz_ = 0;
   std::vector<Mat> m_, v_;

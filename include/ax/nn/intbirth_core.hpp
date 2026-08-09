@@ -788,4 +788,75 @@ std::map<std::string, std::vector<Op>> moe_body_bwd(
   return G;
 }
 
+// ---- head (dense fwd/bwd around the body) ----
+
+template <class Op, class Acc, class Round>
+std::vector<Op> fwd_head(const std::map<std::string, std::vector<Op>>& w,
+                         const std::vector<Op>& x2, cache_t<Op>& c,
+                         const env<Op>& e) {
+  c.h3 = rms_fwd<Op, Acc, Round>(x2, w.at("g3"), c.i3, e.T, e.D, e.Q,
+                                 e.eps32);
+  return finalize_rdiv<Op, Acc, Round>(
+      gemm_acc<Op, Acc>(c.h3, e.T, e.D, w.at("wh"), e.V), Acc(e.Q));
+}
+
+template <class Op, class Acc, class Round>
+std::vector<Op> bwd_head(const std::map<std::string, std::vector<Op>>& w,
+                         const std::vector<Op>& dlogits,
+                         const cache_t<Op>& c,
+                         std::map<std::string, std::vector<Op>>& G,
+                         const env<Op>& e) {
+  G["wh"] = finalize_rdiv<Op, Acc, Round>(
+      gemm_xty_acc<Op, Acc>(dlogits, e.T, e.V, c.h3, e.D), Acc(e.Q));
+  const std::vector<Op> dh3 = finalize_rdiv<Op, Acc, Round>(
+      gemm_nt_acc<Op, Acc>(dlogits, e.T, e.V, w.at("wh"), e.D),
+      Acc(e.Q));
+  return rms_bwd<Op, Acc, Round>(dh3, c.x2, w.at("g3"), c.i3,
+                                 G["g3"], e.T, e.D, e.Q);
+}
+
+// ---- adamw elementwise update (one parameter tensor) ----
+// Verbatim move of the shipped inner loop. Frozen-grain sqrt seam:
+// den = from_grain(isqrt(to_grain(vh) * Q9)) — declared, no-op at
+// gshift 0. Bias-correction factors bc* are scale-free i64 (the
+// BigV machinery stays with the adamw class).
+template <class Op, class Acc, class Round>
+void adamw_update(std::vector<Op>& w, const std::vector<Op>& g,
+                  std::vector<Op>& m, std::vector<Op>& v,
+                  std::int64_t bc1n, std::int64_t bc1d,
+                  std::int64_t bc2n, std::int64_t bc2d, Op Q,
+                  int shift, std::int64_t lrn, std::int64_t lrd,
+                  int gshift, std::int64_t& nz, std::int64_t& tot) {
+  using i64 = std::int64_t;
+  constexpr i64 B1N = 9, B1D = 10, B2N = 999, B2D = 1000;
+  constexpr i64 AEPS = 4, WDN = 1, WDD = 100000;
+  constexpr i64 Q9 = 512;
+  for (std::size_t i = 0; i < w.size(); i++) {
+    m[i] = narrow<Op, Acc>(Round::div(
+        Acc(B1N) * Acc(m[i]) + Acc(B1D - B1N) * Acc(g[i]),
+        Acc(B1D)));
+    v[i] = narrow<Op, Acc>(Round::div(
+        Acc(B2N) * Acc(v[i]) +
+            Acc(B2D - B2N) *
+                Acc(mul_rdiv<Op, Acc, Round>(g[i], g[i], Q)),
+        Acc(B2D)));
+    const Op mh = narrow<Op, Acc>(
+        Round::div(Acc(m[i]) * Acc(bc1n), Acc(bc1d)));
+    const Op vh = narrow<Op, Acc>(
+        Round::div(Acc(v[i]) * Acc(bc2n), Acc(bc2d)));
+    const Op den =
+        Round::from_grain(
+            Op(isqrt_newton(i64(Round::to_grain(vh, gshift)) * Q9)),
+            gshift) +
+        AEPS;
+    const Op upd = narrow<Op, Acc>(
+        Round::div(Acc(lrn) * Acc(mh) * (Acc(Q) << shift),
+                   Acc(lrd) * Acc(den)));
+    nz += upd != 0;
+    tot += 1;
+    w[i] -= upd;
+    w[i] -= mul_rdiv<Op, Acc, Round>(w[i], Op(WDN), Op(WDD));
+  }
+}
+
 }  // namespace ax::nn::ib::core

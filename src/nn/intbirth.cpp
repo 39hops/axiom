@@ -404,10 +404,8 @@ Mat block::fwd(const std::map<std::string, Mat>& w, const Mat& x,
                block_cache& c) const {
   check_weights(w);
   const Mat x2 = body_fwd(w, x, c);
-  c.h3 = rms_fwd(x2, w.at("g3"), c.i3);
-  Mat logits = int_gemm(c.h3, c_.T, c_.D, w.at("wh"), c_.V);
-  rdiv_inplace(logits, Q);
-  return logits;
+  return core::fwd_head<i64, i64, core::RoundHalfAway<i64>>(
+      w, x2, c, make_env());
 }
 
 Mat block::ffn_bwd(const std::map<std::string, Mat>& w,
@@ -454,11 +452,9 @@ std::map<std::string, Mat> block::bwd(
   if (i64(dlogits.size()) != i64(T) * V)
     throw std::runtime_error("intbirth: bad dlogits shape");
   std::map<std::string, Mat> G;
-  G["wh"] = int_gemm_xty(dlogits, T, V, c.h3, D);
-  rdiv_inplace(G["wh"], Q);
-  Mat dh3 = int_gemm_nt(dlogits, T, V, w.at("wh"), D);
-  rdiv_inplace(dh3, Q);
-  const Mat dx2in = rms_bwd(dh3, c.x2, w.at("g3"), c.i3, G["g3"]);
+  const Mat dx2in =
+      core::bwd_head<i64, i64, core::RoundHalfAway<i64>>(
+          w, dlogits, c, G, make_env());
   auto Gb = body_bwd(w, dx2in, c, dx0_out);
   for (auto& [k, g] : Gb) G[k] = std::move(g);
   return G;
@@ -466,9 +462,9 @@ std::map<std::string, Mat> block::bwd(
 
 // ------------------------------------------------------------ adamw
 
-adamw::adamw(int shift, i64 lrn, i64 lrd)
-    : shift_(shift), lrn_(lrn), lrd_(lrd) {
-  if (shift < 0 || lrn < 1 || lrd < 1)
+adamw::adamw(int shift, i64 lrn, i64 lrd, int precision)
+    : shift_(shift), precision_(precision), lrn_(lrn), lrd_(lrd) {
+  if (shift < 0 || lrn < 1 || lrd < 1 || precision != 9)
     throw std::runtime_error("intbirth: bad adamw params");
   p10_ = p9_ = p1000_ = p999_ = BigV{1};
 }
@@ -509,20 +505,10 @@ void adamw::step(const std::vector<Mat*>& params,
     const Mat& g = *grads[j];
     if (w.size() != g.size() || w.size() != m_[j].size())
       throw std::runtime_error("intbirth: grad shape mismatch");
-    for (std::size_t i = 0; i < w.size(); i++) {
-      m_[j][i] = rdiv(B1N * m_[j][i] + (B1D - B1N) * g[i], B1D);
-      v_[j][i] =
-          rdiv(B2N * v_[j][i] + (B2D - B2N) * rdiv(g[i] * g[i], Q),
-               B2D);
-      const i64 mh = rdiv(m_[j][i] * bc1n, bc1d);
-      const i64 vh = rdiv(v_[j][i] * bc2n, bc2d);
-      const i64 den = isqrt_newton(vh * Q) + AEPS;
-      const i64 upd = rdiv(lrn_ * mh * (Q << shift_), lrd_ * den);
-      nz += upd != 0;
-      tot += 1;
-      w[i] -= upd;
-      w[i] -= rdiv(w[i] * WDN, WDD);
-    }
+    core::adamw_update<i64, i64, core::RoundHalfAway<i64>>(
+        w, g, m_[j], v_[j], bc1n, bc1d, bc2n, bc2d,
+        i64{1} << precision_, shift_, lrn_, lrd_, precision_ - 9,
+        nz, tot);
   }
   nz_ = double(nz) / double(tot);
 }
@@ -532,7 +518,7 @@ void adamw::step(const std::vector<Mat*>& params,
 full_birth::full_birth(const std::string& tables_bytes,
                        const std::string& init_bytes,
                        const contract& c)
-    : blk_(tables_bytes, c), opt_(c.shift, c.lrn, c.lrd) {
+    : blk_(tables_bytes, c), opt_(c.shift, c.lrn, c.lrd, c.precision) {
   const auto sh = shapes(c);
   std::size_t off = 0;
   const auto take = [&](std::size_t n) {
@@ -625,7 +611,7 @@ multi_birth::multi_birth(const std::string& tables_bytes,
                          const std::string& init_bytes,
                          const contract& c,
                          const std::string& windows_bytes)
-    : blk_(tables_bytes, c), opt_(c.shift, c.lrn, c.lrd) {
+    : blk_(tables_bytes, c), opt_(c.shift, c.lrn, c.lrd, c.precision) {
   if (c.n_blocks < 1)
     throw std::runtime_error("intbirth: n_blocks < 1");
   const auto sh = shapes(c);
@@ -796,7 +782,7 @@ void multi_birth::step_once() {
 moe_birth::moe_birth(const std::string& tables_bytes,
                      const std::string& init_bytes, const contract& c,
                      const std::string& windows_bytes)
-    : blk_(tables_bytes, c), opt_(c.shift, c.lrn, c.lrd) {
+    : blk_(tables_bytes, c), opt_(c.shift, c.lrn, c.lrd, c.precision) {
   if (c.n_blocks < 1)
     throw std::runtime_error("intbirth: n_blocks < 1");
   if (c.n_experts < 1)
