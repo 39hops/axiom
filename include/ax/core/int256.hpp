@@ -158,11 +158,18 @@ struct i256 {
   }
 
   /** explicit so accidental narrowing can't happen silently; the
-      intbirth core's checked narrow<> is the intended path. */
+      intbirth core's checked narrow<> is the intended path. Both
+      64-bit builtin types get an operator because int64_t is
+      `long long` on Darwin but `long` on Linux/LP64 — gcc will not
+      route one through the other. */
   explicit operator __int128() const { return to_i128(); }
   explicit operator long long() const {
     const __int128 v = to_i128();
     return (long long)(v);
+  }
+  explicit operator long() const {
+    const __int128 v = to_i128();
+    return (long)(v);
   }
 
   __int128 to_i128() const {

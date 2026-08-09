@@ -31,8 +31,11 @@ struct exr {
       compared against 2^ceiling via bigint). Default 2^22. */
   static inline unsigned bit_ceiling = 1u << 22;
 
+  // int64_t is `long long` on Darwin but `long` on Linux/LP64; all
+  // three ctors are needed or gcc finds Op(int64_t) ambiguous.
   exr() = default;
   exr(int x) : v(ax::bigint(x)) {}                    // NOLINT
+  exr(long x) : v(ax::bigint((long long)x)) {}        // NOLINT
   exr(long long x) : v(ax::bigint(x)) {}              // NOLINT
   explicit exr(ax::rational r) : v(std::move(r)) { guard(); }
 
@@ -79,12 +82,17 @@ struct exr {
     if (v.num().is_negative() && !r.is_zero()) return q - ax::bigint(1);
     return q;
   }
-  /** DECLARED floor conversion (frozen-grain seams + de-grain). */
+  /** DECLARED floor conversion (frozen-grain seams + de-grain).
+      Same Darwin/Linux int64_t split as the ctors: both 64-bit
+      builtin types need an operator. */
   explicit operator long long() const {
     const ax::bigint f = floor_big();
     // exact small-int extraction via decimal round-trip (cold path:
     // seams only, a handful per token per layer)
     return std::stoll(f.to_string());
+  }
+  explicit operator long() const {
+    return (long)static_cast<long long>(*this);
   }
 };
 

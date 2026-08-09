@@ -54,8 +54,10 @@ std::string tiny_tables(int T, int DH) {
   return b;
 }
 std::string tiny_init(const ib::core::birth_cfg_t& c) {
+  // raw-engine mapping, not uniform_int_distribution: the latter is
+  // implementation-defined across stdlibs (see intbirth_ladder_test)
   std::mt19937_64 rng(613);
-  std::uniform_int_distribution<i64> d(-256, 256);
+  const auto d = [](std::mt19937_64& r) { return i64(r() % 513) - 256; };
   const std::size_t sizes[11] = {
       std::size_t(c.DH) * c.D, std::size_t(c.DH) * c.D,
       std::size_t(c.DH) * c.D, std::size_t(c.D) * c.DH,

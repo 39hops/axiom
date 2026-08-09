@@ -65,8 +65,12 @@ std::string tiny_tables(const ib::contract& c) {
 /** init: 11 KEYS tensors at shipped Q9 scale, then x [T,D], then
     tgt [T] (int64 LE) — the full_birth ctor convention. */
 std::string tiny_init(const ib::contract& c) {
+  // NOT std::uniform_int_distribution: its engine->value mapping is
+  // implementation-defined (libc++ and libstdc++ differ), which made
+  // the pinned rung digests stdlib-dependent. mt19937_64's raw
+  // stream is fully specified, so modulo it directly.
   std::mt19937_64 rng(613);
-  std::uniform_int_distribution<i64> d(-256, 256);
+  const auto d = [](std::mt19937_64& r) { return i64(r() % 513) - 256; };
   const std::size_t sizes[11] = {
       std::size_t(c.DH) * c.D, std::size_t(c.DH) * c.D,
       std::size_t(c.DH) * c.D, std::size_t(c.D) * c.DH,
@@ -112,12 +116,14 @@ TEST(IntbirthLadder, Q32ReferenceDigest) {
   // Pinned Q32 rung reference on the tiny fixture (40 steps).
   // Self-referenced until llmopt counter-books it (relay pending);
   // any drift in the Q32 arithmetic path breaks this loudly.
+  // Verified identical under Apple clang/libc++ and gcc-16/libstdc++
+  // (2026-08-09, post raw-engine fixture fix).
   const auto c = tiny_contract(32);
   ib::full_birth fb(tiny_tables(c), tiny_init(c), c);
   fb.run(40);
   EXPECT_EQ(
       fb.mark(),
-      "cd62c4624ed1a6cc3eb069089f6ab02064f060d7468fad84dfd147fb23bad99d");
+      "ccbec427dd4f9a689a55a657510863b6a09f79b38e344a1e7d8fd3eca24a6197");
 }
 
 TEST(IntbirthLadder, UnwiredPrecisionStillRefuses) {
@@ -141,8 +147,10 @@ TEST(IntbirthLadder, Q64AcceptedRunsDeterministicAndTracksQ9) {
 TEST(IntbirthLadder, Q64ReferenceDigest) {
   // Pinned Q64 rung reference (40 steps, i128 weights serialized
   // 16-byte LE). Self-referenced until llmopt counter-books.
+  // Verified identical under Apple clang/libc++ and gcc-16/libstdc++
+  // (2026-08-09, post raw-engine fixture fix).
   const auto c = tiny_contract(64);
   ib::full_birth fb(tiny_tables(c), tiny_init(c), c);
   fb.run(40);
-  EXPECT_EQ(fb.mark(), "92134da77f8b189c44016419b70494cfa90ccb1a3523a9fba4906065236fe05f");
+  EXPECT_EQ(fb.mark(), "bfd00a5b85e562421e15c22a263756a8a2fef10b0260df989939a213eea3e621");
 }

@@ -13,8 +13,10 @@ namespace ib = ax::nn::ib;
 using ib::i64;
 
 TEST(IntbirthCore, I64InstantiationMatchesShippedGemmForms) {
+  // raw-engine mapping, not uniform_int_distribution: the latter is
+  // implementation-defined across stdlibs (see intbirth_ladder_test)
   std::mt19937_64 rng(613);
-  std::uniform_int_distribution<i64> d(-1000, 1000);
+  const auto d = [](std::mt19937_64& r) { return i64(r() % 2001) - 1000; };
   ib::Mat a(6 * 8), w(4 * 8), wn(8 * 4);
   for (auto& v : a) v = d(rng);
   for (auto& v : w) v = d(rng);
