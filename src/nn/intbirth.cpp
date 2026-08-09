@@ -302,70 +302,23 @@ void block::check_weights(const std::map<std::string, Mat>& w) const {
 
 Mat block::softmax_rows(const Mat& s, int rows, int C,
                         i64 scale) const {
-  const Mat& ex = tab_.at("exp.tab");
-  Mat p(std::size_t(rows) * C), e(C);
-  for (int t = 0; t < rows; t++) {
-    i64 m = s[std::size_t(t) * C];
-    for (int cc = 1; cc < C; cc++)
-      m = std::max(m, s[std::size_t(t) * C + cc]);
-    i64 z = 0;
-    for (int cc = 0; cc < C; cc++) {
-      i64 d = s[std::size_t(t) * C + cc] - m;
-      if (d < -tse_ - 1) d = -tse_ - 1;
-      e[cc] = d < -tse_ ? 0 : ex[d + tse_];
-      z += e[cc];
-    }
-    for (int cc = 0; cc < C; cc++)
-      p[std::size_t(t) * C + cc] = rdiv(e[cc] * scale, z);
-  }
-  return p;
+  return core::softmax_rows<i64, i64, core::RoundHalfAway<i64>>(
+      s, rows, C, scale, tab_.at("exp.tab"), tse_,
+      c_.precision - 9);
 }
 
 Mat block::rms_fwd(const Mat& xx, const Mat& g, Mat& isq) const {
   const int T = c_.T, D = c_.D;
   if (i64(xx.size()) != i64(T) * D || i64(g.size()) != D)
     throw std::runtime_error("intbirth: rms_fwd shape");
-  Mat y(std::size_t(T) * D);
-  isq.assign(T, 0);
-  for (int t = 0; t < T; t++) {
-    i64 s2 = 0;
-    for (int d = 0; d < D; d++) {
-      const i64 v = xx[std::size_t(t) * D + d];
-      s2 += v * v;
-    }
-    const i64 m40 = (s2 / D) * (i64(1) << 32) / (Q * Q) + c_.eps32;
-    isq[t] = isqrt_newton(m40);
-    for (int d = 0; d < D; d++)
-      y[std::size_t(t) * D + d] =
-          rdiv(rdiv(xx[std::size_t(t) * D + d] * g[d], Q) * R16,
-               isq[t]);
-  }
-  return y;
+  return core::rms_fwd<i64, i64, core::RoundHalfAway<i64>>(
+      xx, g, isq, T, D, contract_Q(c_), c_.eps32);
 }
 
 Mat block::rms_bwd(const Mat& dy, const Mat& xx, const Mat& g,
                    const Mat& isq, Mat& dg) const {
-  const int T = c_.T, D = c_.D;
-  Mat dx(std::size_t(T) * D);
-  dg.assign(D, 0);
-  Mat tv(D);
-  for (int t = 0; t < T; t++) {
-    i64 inner = 0;
-    for (int d = 0; d < D; d++) {
-      tv[d] = rdiv(g[d] * dy[std::size_t(t) * D + d], Q);
-      inner += rdiv(tv[d] * xx[std::size_t(t) * D + d], Q);
-    }
-    for (int d = 0; d < D; d++) {
-      const i64 xv = xx[std::size_t(t) * D + d];
-      const i64 term1 = rdiv(tv[d] * R16, isq[t]);
-      i64 cc = rdiv(xv * inner, i64(D) * Q);
-      for (int r = 0; r < 3; r++) cc = rdiv(cc * R16, isq[t]);
-      dx[std::size_t(t) * D + d] = term1 - cc;
-      dg[d] += rdiv(rdiv(dy[std::size_t(t) * D + d] * xv, Q) * R16,
-                    isq[t]);
-    }
-  }
-  return dx;
+  return core::rms_bwd<i64, i64, core::RoundHalfAway<i64>>(
+      dy, xx, g, isq, dg, c_.T, c_.D, contract_Q(c_));
 }
 
 Mat block::attn_fwd(const std::map<std::string, Mat>& w, const Mat& x,
