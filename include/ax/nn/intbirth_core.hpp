@@ -71,7 +71,10 @@ struct RoundHalfAway {
     const Op r = (ax + d / 2) / d;
     return x < 0 ? -r : r;
   }
-  static Op to_grain(Op x, int gshift) {    // floor-truncate
+  /** Rung scale -> shipped scale: FLOOR (arithmetic shift toward
+      -inf), not round-half-away and not toward-zero truncation —
+      the frozen-grain seam is declared as exactly this shift. */
+  static Op to_grain(Op x, int gshift) {
     return gshift ? (x >> gshift) : x;
   }
   static Op from_grain(Op x, int gshift) {  // exact re-embed
@@ -176,10 +179,14 @@ inline std::int64_t isqrt_round(std::int64_t n) {
 
 /** Integer row softmax at `scale` units via the shipped exp table
     (the r1b construction). Frozen-grain seam: the table INDEX is
-    the max-shifted logit truncated to the shipped grain; e and z
-    live at shipped table scale (i64) at every rung; the output
-    carries `scale` (a frozen carry, i64). */
-template <class Op, class Acc, class Round>
+    the max-shifted logit FLOORED to the shipped grain (to_grain);
+    e, z, and the output all live at shipped/frozen scales at every
+    rung — deliberately no Acc/Round params, so the freeze cannot
+    be violated invisibly. `scale` must be a frozen carry (PQ
+    class, << 2^40): e*scale is then always safe in i64. Row sums
+    of the output are NOT exactly `scale` (per-element rounding,
+    no residual assignment) — nothing downstream may assume it. */
+template <class Op>
 std::vector<Op> softmax_rows(const std::vector<Op>& s, int rows,
                              int C, std::int64_t scale,
                              const std::vector<std::int64_t>& ex,
@@ -193,7 +200,7 @@ std::vector<Op> softmax_rows(const std::vector<Op>& s, int rows,
       m = std::max(m, s[std::size_t(t) * C + cc]);
     i64 z = 0;
     for (int cc = 0; cc < C; cc++) {
-      i64 d = i64(RoundHalfAway<Op>::to_grain(
+      i64 d = i64(RoundHalfAway<Op>::to_grain(  // floor to shipped
           s[std::size_t(t) * C + cc] - m, gshift));
       if (d < -tse - 1) d = -tse - 1;
       e[cc] = d < -tse ? 0 : ex[d + tse];
@@ -330,8 +337,7 @@ std::vector<Op> attn_fwd(const std::map<std::string, std::vector<Op>>& w,
   for (int t = 0; t < T; t++)
     for (int u = t + 1; u < T; u++)
       s[std::size_t(t) * T + u] = floor_v;  // causal
-  c.p = softmax_rows<Op, Acc, Round>(s, T, T, e.PQ, *e.ex, e.tse,
-                                     e.gshift);
+  c.p = softmax_rows<Op>(s, T, T, e.PQ, *e.ex, e.tse, e.gshift);
   c.a = gemm_nt<Op, Acc>(c.p, T, T, c.v0, DH);
   rdiv_inplace<Op, Round>(c.a, Op(e.PQ));
   std::vector<Op> pre1 = gemm<Op, Acc>(c.a, T, DH, w.at("wo"), D);

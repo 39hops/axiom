@@ -265,6 +265,10 @@ block::block(const std::string& tables_bytes, const contract& c)
   // check gates full_birth/multi_birth/moe_birth too.
   if (c_.precision != 9)
     throw std::runtime_error("intbirth: bad precision");
+  // eps32 >= 1 makes rmsnorm isq >= 1 structural: rms_bwd divides
+  // by isq, and m40 >= eps32 in rms_fwd is the only floor.
+  if (c_.eps32 < 1)
+    throw std::runtime_error("intbirth: bad eps32");
   scale_ = isqrt_round(Q * Q * i64(c_.DH));
   tab_ = parse_axp3(tables_bytes);
   for (const char* k : {"silu.tab", "dsilu.tab", "exp.tab",
@@ -302,9 +306,9 @@ void block::check_weights(const std::map<std::string, Mat>& w) const {
 
 Mat block::softmax_rows(const Mat& s, int rows, int C,
                         i64 scale) const {
-  return core::softmax_rows<i64, i64, core::RoundHalfAway<i64>>(
-      s, rows, C, scale, tab_.at("exp.tab"), tse_,
-      c_.precision - 9);
+  return core::softmax_rows<i64>(s, rows, C, scale,
+                                 tab_.at("exp.tab"), tse_,
+                                 c_.precision - 9);
 }
 
 Mat block::rms_fwd(const Mat& xx, const Mat& g, Mat& isq) const {
