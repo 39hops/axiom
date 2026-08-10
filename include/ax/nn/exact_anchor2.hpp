@@ -22,6 +22,7 @@
 #ifdef AX_ANCHOR2_TRACE
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <execinfo.h>
 #endif
 #include <stdexcept>
@@ -116,6 +117,10 @@ struct rx {
     std::fflush(stderr);
   }
   static inline long trace_budget = 0;  // straddles left to trace
+  /** which ENGINE seam the current floor came from: de-grain
+      (Exact2::to_grain) vs the i64 conversions (operator long long,
+      e.g. rms_fwd's isqrt input). Set by the caller, probe-only. */
+  static inline const char* site_tag = "i64conv";
 #endif
 
   /** the fallback court: CRT + rational reconstruction, loud */
@@ -274,9 +279,12 @@ struct rx {
       const ax::bigint above = v.den() - below;
       const ax::bigint rr = (above < below) ? above : below;
       std::fprintf(stderr,
-                   "[|r|] lg2|r|=%d lg2(den)=%d  (witness would need "
-                   "|r| recoverable)\n",
-                   ax::dyi::bit_len(rr), ax::dyi::bit_len(v.den()));
+                   "{\"ev\":\"near_tie\",\"seam\":\"%s\","
+                   "\"lg2r\":%d,\"lg2den\":%d,\"w\":%s,"
+                   "\"degrain\":%s}\n",
+                   site_tag, ax::dyi::bit_len(rr),
+                   ax::dyi::bit_len(v.den()), (fh - fl).to_string().c_str(),
+                   std::strcmp(site_tag, "to_grain") == 0 ? "true" : "false");
       std::fflush(stderr);
     }
 #endif
@@ -337,7 +345,14 @@ struct Exact2 {
 
   static rx to_grain(const rx& x, int gshift) {
     const rx s = gshift ? (x >> gshift) : x;
+#ifdef AX_ANCHOR2_TRACE
+    rx::site_tag = "to_grain";
+    const rx out = rx::from_int(s.floor_decl());
+    rx::site_tag = "i64conv";
+    return out;
+#else
     return rx::from_int(s.floor_decl());
+#endif
   }
   static rx from_grain(const rx& x, int gshift) {
     return gshift ? (x << gshift) : x;
