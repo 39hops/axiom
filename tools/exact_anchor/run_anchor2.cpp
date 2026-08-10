@@ -119,8 +119,10 @@ int main(int argc, char** argv) {
     // pin 3, measured rate: floor-tie distance exponents at d64 fit
     // ~21*1.5^N (358 @ step 7, 798 @ step 9) — geometric, so the
     // shadow schedule is geometric with ~2x margin
-    ax::dyi::prec = std::max(120 + 80 * s,
-                             90 + int(40.0 * std::pow(1.5, s)));
+    // pin 3, revised after the step-9 tie: measured tie widths are
+    // LOWER BOUNDS (dist < 2^-358 @7, < 2^-1585 @9 at matching prec)
+    // — the deepening is super-geometric, so steps 9+ escalate hard
+    ax::dyi::prec = s <= 8 ? 120 + 80 * s : 2000 << (s - 8);
     const auto t0 = std::chrono::steady_clock::now();
     b.run(1);
     const std::string dig = b.mark();
