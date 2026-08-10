@@ -220,13 +220,17 @@ struct rx {
           return k;
         }
     }
+    const std::string why =
+        "floor w=" + (fh - fl).to_string() +
+        " lo_bits=" + std::to_string(ax::dyi::bit_len(sh.lo)) +
+        " e=" + std::to_string(sh.e);
     const std::uint64_t key = hash_res();
     const auto it = site_cache.find(key);
     if (it != site_cache.end() && it->second.res == res) {
       fb.cache_hit++;
       return it->second.fl;
     }
-    const ax::rational v = reconstruct_rat("floor");
+    const ax::rational v = reconstruct_rat(why.c_str());
     const auto [q, r] = ax::bigint::divmod(v.num(), v.den());
     ax::bigint f = q;
     if (v.num().is_negative() && !r.is_zero()) f = f - ax::bigint(1);
