@@ -122,7 +122,55 @@ sliced slice_row(const float* x, int n) {
   return out;
 }
 std::vector<dyadic> gemm_fp32limb(const matf& A, const matf& B) {
-  throw std::runtime_error("unimplemented");
+  if (A.cols != B.rows) throw std::runtime_error("fp32limb: shape mismatch");
+  const int K = A.cols;
+  std::vector<dyadic> c(static_cast<std::size_t>(A.rows) * B.cols,
+                        dyadic{bigint(0), 0});
+  std::vector<float> seg(BLOCK);
+  for (int b0 = 0; b0 < K; b0 += BLOCK) {
+    const int n = std::min(BLOCK, K - b0);
+    // slice every A-row segment and B-column segment of this K-block
+    std::vector<sliced> sa(static_cast<std::size_t>(A.rows));
+    std::vector<sliced> sb(static_cast<std::size_t>(B.cols));
+    for (int i = 0; i < A.rows; ++i) {
+      for (int k = 0; k < n; ++k)
+        seg[static_cast<std::size_t>(k)] = A.at(i, b0 + k);
+      sa[static_cast<std::size_t>(i)] = slice_row(seg.data(), n);
+    }
+    for (int j = 0; j < B.cols; ++j) {
+      for (int k = 0; k < n; ++k)
+        seg[static_cast<std::size_t>(k)] = B.at(b0 + k, j);
+      sb[static_cast<std::size_t>(j)] = slice_row(seg.data(), n);
+    }
+    for (int i = 0; i < A.rows; ++i) {
+      const sliced& pa = sa[static_cast<std::size_t>(i)];
+      for (int j = 0; j < B.cols; ++j) {
+        const sliced& pb = sb[static_cast<std::size_t>(j)];
+        dyadic& out = c[static_cast<std::size_t>(i) * B.cols + j];
+        for (std::size_t p = 0; p < pa.sl.size(); ++p) {
+          for (std::size_t q = 0; q < pb.sl.size(); ++q) {
+            // the kernel-shaped part: fp32 multiply-accumulate. Each
+            // product of two SLICE_W-bit slices and each of the <= BLOCK
+            // adds is exact by 2*SLICE_W + log2(BLOCK) <= 24.
+            float accf = 0.0f;
+            for (int k = 0; k < n; ++k) {
+              accf += pa.sl[p][static_cast<std::size_t>(k)] *
+                      pb.sl[q][static_cast<std::size_t>(k)];
+              // release-safe fence: no fp32 partial may reach 2^24
+              if (std::fabs(accf) >= 16777216.0f)
+                throw std::runtime_error("fp32limb: partial overflow");
+            }
+            // accf is an exact integer; fold it in at its scale
+            acc(out, bigint(std::llround(accf)),
+                -SLICE_W * (static_cast<int>(p) + 1) -
+                    SLICE_W * (static_cast<int>(q) + 1) + pa.e_align +
+                    pb.e_align);
+          }
+        }
+      }
+    }
+  }
+  return c;
 }
 
 }  // namespace ax::la::fp32limb

@@ -151,3 +151,33 @@ TEST(fp32limb_slice, wide_exponent_spread_is_loud_envelope_reject) {
   EXPECT_NO_THROW(slice_row(x.data(), 1));  // alone it aligns fine
   EXPECT_THROW(slice_row(x.data(), BLOCK), std::runtime_error);
 }
+
+namespace {
+matf random_matf(int r, int c, ax::st::rng& g, bool scaled_normal) {
+  matf m(r, c);
+  for (auto& v : m.v)
+    v = scaled_normal ? static_cast<float>(g.normal() * 0.05)
+                      : static_cast<float>(g.uniform(-1.0, 1.0));
+  return m;
+}
+}  // namespace
+
+// P-ENVELOPE-EXACT: fp32-limb GEMM equals the bigint reference exactly,
+// inside the envelope, across sizes straddling the K-block boundary.
+TEST(fp32limb_gemm, p_envelope_exact) {
+  for (int n : {8, 33, 64}) {
+    for (std::uint64_t seed : {1, 2, 3, 4, 5}) {
+      for (bool cls : {false, true}) {
+        ax::st::rng g(seed * 1000 + static_cast<std::uint64_t>(n) + cls);
+        const matf a = random_matf(n, n, g, cls);
+        const matf b = random_matf(n, n, g, cls);
+        const auto ours = gemm_fp32limb(a, b);
+        const auto ref = gemm_ref(a, b);
+        ASSERT_EQ(ours.size(), ref.size());
+        for (std::size_t t = 0; t < ref.size(); ++t)
+          ASSERT_TRUE(dyadic_eq(ours[t], ref[t]))
+              << "n=" << n << " seed=" << seed << " cls=" << cls << " t=" << t;
+      }
+    }
+  }
+}
