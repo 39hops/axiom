@@ -181,3 +181,89 @@ TEST(fp32limb_gemm, p_envelope_exact) {
     }
   }
 }
+
+namespace {
+// strip trailing zero bits so equal values get equal (m, e) representation
+dyadic normalized(dyadic d) {
+  if (d.m == bigint(0)) return {bigint(0), 0};
+  while (d.m % bigint(2) == bigint(0)) {
+    d.m = d.m >> 1u;
+    d.e += 1;
+  }
+  return d;
+}
+}  // namespace
+
+// Registered class: exponent spread INSIDE a K-block — the axis that
+// separates exactness from a compensation trick.
+TEST(fp32limb_class, exponent_spread_inside_block_exact) {
+  ax::st::rng g(31);
+  const int n = 64;
+  matf a(n, n), b(n, n);
+  for (auto* m : {&a, &b})
+    for (auto& v : m->v)
+      v = static_cast<float>(g.uniform(-1.0, 1.0) *
+                             std::ldexp(1.0, -int(g.below(26))));
+  const auto ours = gemm_fp32limb(a, b);
+  const auto ref = gemm_ref(a, b);
+  for (std::size_t t = 0; t < ref.size(); ++t)
+    ASSERT_TRUE(dyadic_eq(ours[t], ref[t])) << "t=" << t;
+}
+
+TEST(fp32limb_class, spread_beyond_envelope_is_loud_reject) {
+  ax::st::rng g(32);
+  const int n = 33;
+  matf a(n, n), b(n, n);
+  for (auto* m : {&a, &b})
+    for (auto& v : m->v)
+      v = static_cast<float>(g.uniform(1.0, 2.0));  // full mantissas
+  a.at(0, 1) = std::ldexp(a.at(0, 1), -40);  // full-mantissa outlier
+  EXPECT_THROW(gemm_fp32limb(a, b), std::runtime_error);
+}
+
+// Registered class: K-permutation — permute the reduction axis with one
+// shared permutation of A's columns and B's rows; output must be
+// BIT-IDENTICAL (best single exactness detector we know).
+TEST(fp32limb_class, k_permutation_bit_identical) {
+  const int n = 64;
+  for (std::uint64_t seed : {41, 42, 43}) {
+    ax::st::rng g(seed);
+    const matf a = random_matf(n, n, g, true);
+    const matf b = random_matf(n, n, g, true);
+    const auto base = gemm_fp32limb(a, b);
+    for (int rep = 0; rep < 3; ++rep) {
+      std::vector<int> perm(n);
+      for (int k = 0; k < n; ++k) perm[static_cast<std::size_t>(k)] = k;
+      for (int k = n - 1; k > 0; --k)
+        std::swap(perm[static_cast<std::size_t>(k)],
+                  perm[g.below(static_cast<std::uint64_t>(k) + 1)]);
+      matf ap(n, n), bp(n, n);
+      for (int i = 0; i < n; ++i)
+        for (int k = 0; k < n; ++k) {
+          ap.at(i, k) = a.at(i, perm[static_cast<std::size_t>(k)]);
+          bp.at(k, i) = b.at(perm[static_cast<std::size_t>(k)], i);
+        }
+      const auto permuted = gemm_fp32limb(ap, bp);
+      for (std::size_t t = 0; t < base.size(); ++t) {
+        const dyadic x = normalized(base[t]), y = normalized(permuted[t]);
+        ASSERT_TRUE(x.m == y.m && x.e == y.e)
+            << "seed=" << seed << " rep=" << rep << " t=" << t;
+      }
+    }
+  }
+}
+
+// Registered class: denormal-range inputs. CPU has no FTZ by default; the
+// Metal port must re-verify FTZ behavior (per-link table note).
+TEST(fp32limb_class, denormal_range_exact) {
+  ax::st::rng g(51);
+  const int n = 33;
+  matf a(n, n), b(n, n);
+  for (auto* m : {&a, &b})
+    for (auto& v : m->v)
+      v = std::ldexp(static_cast<float>(g.uniform(-1.0, 1.0)), -120);
+  const auto ours = gemm_fp32limb(a, b);
+  const auto ref = gemm_ref(a, b);
+  for (std::size_t t = 0; t < ref.size(); ++t)
+    ASSERT_TRUE(dyadic_eq(ours[t], ref[t])) << "t=" << t;
+}
