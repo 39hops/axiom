@@ -51,3 +51,55 @@ TEST(fp32limb_ref, rejects_nonfinite) {
   b.at(0, 0) = 1.0f;
   EXPECT_THROW(gemm_ref(a, b), std::runtime_error);
 }
+
+#include <ax/st/rng.hpp>
+
+namespace {
+// Exact dyadic sum of a list of floats — bigint ground truth for EFT tests.
+dyadic exact_sum(const std::vector<float>& xs) {
+  dyadic r{bigint(0), 0};
+  for (float x : xs) {
+    const dyadic d = decode(x);
+    acc(r, d.m, d.e);
+  }
+  return r;
+}
+}  // namespace
+
+TEST(fp32limb_eft, two_sum_exact_10k_random_pairs) {
+  ax::st::rng g(20260810);
+  for (int t = 0; t < 10000; ++t) {
+    // spread exponents so hi/lo splits are exercised
+    const float a =
+        static_cast<float>(g.uniform(-1.0, 1.0) * std::ldexp(1.0, int(g.below(40)) - 20));
+    const float b =
+        static_cast<float>(g.uniform(-1.0, 1.0) * std::ldexp(1.0, int(g.below(40)) - 20));
+    const f2 sr = two_sum(a, b);
+    EXPECT_TRUE(dyadic_eq(exact_sum({a, b}), exact_sum({sr.s, sr.r})))
+        << "a=" << a << " b=" << b;
+  }
+}
+
+TEST(fp32limb_eft, expansion_sums_1000_random_exactly) {
+  ax::st::rng g(7);
+  std::vector<float> xs;
+  for (int t = 0; t < 1000; ++t)
+    xs.push_back(static_cast<float>(
+        g.uniform(-1.0, 1.0) * std::ldexp(1.0, int(g.below(30)) - 15)));
+  std::vector<float> e{0.0f};
+  for (float x : xs) e = exp_add(std::move(e), x);
+  EXPECT_TRUE(dyadic_eq(exact_sum(xs), exact_sum(e)));
+}
+
+TEST(fp32limb_eft, capped_expansion_triple_double_ok_and_overflow_throws) {
+  // three well-separated components: fits in cap 3
+  std::vector<float> e{0.0f};
+  for (float x : {std::ldexp(1.0f, 60), std::ldexp(1.0f, 30), 1.0f})
+    e = exp_add_capped(std::move(e), x, 3);
+  EXPECT_TRUE(dyadic_eq(
+      exact_sum({std::ldexp(1.0f, 60), std::ldexp(1.0f, 30), 1.0f}),
+      exact_sum(e)));
+  // a fourth separated component must be a loud reject, not silent rounding
+  EXPECT_THROW(exp_add_capped(std::move(e), std::ldexp(1.0f, -30), 3),
+               std::runtime_error);
+}

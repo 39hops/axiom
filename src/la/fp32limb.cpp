@@ -54,13 +54,32 @@ std::vector<dyadic> gemm_ref(const matf& A, const matf& B) {
   return c;
 }
 
-f2 two_sum(float a, float b) { throw std::runtime_error("unimplemented"); }
-std::vector<float> exp_add(std::vector<float> e, float x) {
-  throw std::runtime_error("unimplemented");
+// Knuth two-sum; correct only under strict IEEE semantics (this build has
+// no fast-math; the Metal port must pin fast-math OFF — pre-reg risk item).
+f2 two_sum(float a, float b) {
+  const float s = a + b;
+  const float bb = s - a;
+  const float r = (a - (s - bb)) + (b - bb);
+  return {s, r};
 }
+
+std::vector<float> exp_add(std::vector<float> e, float x) {
+  std::vector<float> out;
+  for (float c : e) {
+    const f2 sr = two_sum(c, x);
+    x = sr.s;
+    if (sr.r != 0.0f) out.push_back(sr.r);
+  }
+  out.push_back(x);
+  return out;
+}
+
 std::vector<float> exp_add_capped(std::vector<float> e, float x,
                                   std::size_t cap) {
-  throw std::runtime_error("unimplemented");
+  auto out = exp_add(std::move(e), x);
+  if (out.size() > cap)
+    throw std::runtime_error("fp32limb: expansion exceeds cap");
+  return out;
 }
 sliced slice_row(const float* x, int n) {
   throw std::runtime_error("unimplemented");
