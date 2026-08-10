@@ -19,6 +19,11 @@
     loudly, never returns a plausible wrong value. */
 #include <compare>
 #include <cstdint>
+#ifdef AX_ANCHOR2_TRACE
+#include <cstdio>
+#include <cstdlib>
+#include <execinfo.h>
+#endif
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -95,6 +100,24 @@ struct rx {
     return r;
   }
 
+#ifdef AX_ANCHOR2_TRACE
+  /** probe builds only (default builds unchanged): name the ENGINE
+      call site of a straddle by its C++ stack, so the blocking seam
+      can be identified rather than argued about. Build with
+      -DAX_ANCHOR2_TRACE -g -rdynamic. */
+  static void trace_site(const char* tag) {
+    void* fr[64];
+    const int n = ::backtrace(fr, 64);
+    char** sym = ::backtrace_symbols(fr, n);
+    std::fprintf(stderr, "== anchor2 trace [%s] ==\n", tag);
+    for (int i = 0; i < n && i < 24; ++i)
+      std::fprintf(stderr, "  %s\n", sym ? sym[i] : "?");
+    std::free(sym);
+    std::fflush(stderr);
+  }
+  static inline long trace_budget = 0;  // straddles left to trace
+#endif
+
   /** the fallback court: CRT + rational reconstruction, loud */
   ax::rational reconstruct_rat(const char* why = "?") const {
     if (res.empty()) return ax::rational(ax::bigint(0));
@@ -102,9 +125,13 @@ struct rx {
     const std::vector<std::uint8_t> ok =
         okm.empty() ? std::vector<std::uint8_t>(ctx.P.size(), 1) : okm;
     const auto rec = ax::rns::reconstruct(res, ok, ctx);
-    if (!rec.ok)
+    if (!rec.ok) {
+#ifdef AX_ANCHOR2_TRACE
+      trace_site("MODULUS EXHAUSTED");
+#endif
       throw std::runtime_error(
           std::string("anchor2: modulus exhausted (site ") + why + ")");
+    }
     return rec.v;
   }
 
@@ -208,6 +235,9 @@ struct rx {
   ax::bigint floor_decl() const {
     const auto [fl, fh] = sh.floor_pair();
     if (fl == fh) return fl;
+#ifdef AX_ANCHOR2_TRACE
+    if (trace_budget > 0) { trace_budget--; trace_site("STRADDLE"); }
+#endif
     // exact-boundary class (the probe's dominant straddle): if an
     // integer inside the straddle EQUALS the value, the floor is
     // that integer — decidable residue-natively (pin 1), no
@@ -235,6 +265,21 @@ struct rx {
     ax::bigint f = q;
     if (v.num().is_negative() && !r.is_zero()) f = f - ax::bigint(1);
     if (r.is_zero()) fb.floor_exact++; else fb.floor_near++;
+#ifdef AX_ANCHOR2_TRACE
+    if (!r.is_zero()) {
+      // |r| for the pre-registered observable: distance to the
+      // NEARER integer, as the integer numerator over den.
+      // dist = |num - k*den| / den, so |r| = |num - k*den|.
+      const ax::bigint below = ax::abs(v.num() - f * v.den());
+      const ax::bigint above = v.den() - below;
+      const ax::bigint rr = (above < below) ? above : below;
+      std::fprintf(stderr,
+                   "[|r|] lg2|r|=%d lg2(den)=%d  (witness would need "
+                   "|r| recoverable)\n",
+                   ax::dyi::bit_len(rr), ax::dyi::bit_len(v.den()));
+      std::fflush(stderr);
+    }
+#endif
     site_cache[key] = {res, f};
     return f;
   }

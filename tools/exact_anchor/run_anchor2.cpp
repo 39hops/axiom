@@ -113,6 +113,14 @@ int main(int argc, char** argv) {
   }
   const char* dump = argc > 5 ? argv[5] : nullptr;
 
+#ifdef AX_ANCHOR2_TRACE
+  // probe build only: name straddle sites, and allow a fixed low
+  // precision so the seam class can be enumerated cheaply
+  if (const char* t = std::getenv("AX_TRACE_STRADDLES"))
+    a2::rx::trace_budget = std::atol(t);
+  const int prec_override =
+      std::getenv("AX_PREC") ? std::atoi(std::getenv("AX_PREC")) : 0;
+#endif
   a2::rx::init(nprimes, 160);
   core::birth_impl<a2::rx, a2::rx, a2::Exact2> b(tb, in, c);
   for (int s = 1; s <= steps; ++s) {
@@ -126,6 +134,9 @@ int main(int argc, char** argv) {
     // prec 773 and only the one with the tighter earlier schedule
     // decided it.
     ax::dyi::prec = s <= 8 ? 120 + 80 * s : 2000 << (s - 8);
+#ifdef AX_ANCHOR2_TRACE
+    if (prec_override) ax::dyi::prec = prec_override;
+#endif
     const auto t0 = std::chrono::steady_clock::now();
     b.run(1);
     const std::string dig = b.mark();
