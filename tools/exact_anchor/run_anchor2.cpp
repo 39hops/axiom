@@ -121,6 +121,24 @@ int main(int argc, char** argv) {
   const int prec_override =
       std::getenv("AX_PREC") ? std::atoi(std::getenv("AX_PREC")) : 0;
 #endif
+  // FUNNEL-PREC closed loop (PRE-REG FUNNEL-PREC, relay
+  // 2026-08-10-16). AX_FUNNEL=1 enables it; AX_ENTRY_PREC sets the
+  // step-1 precision (the inherited open-loop entry state — the
+  // controller owns step 2 onward). Pinned law, index never
+  // consulted:
+  //   S = min slack bits over the step's floor sites
+  //   D = max reconstructed denominator bits (0 if none)
+  //   want = prec(s) - S + T,  lifted to D + G when D > 0
+  //   prec(s+1) = max(64, 32*ceil(want/32))
+  // Constants pinned: T = 96 (target slack), G = 64 (recon guard),
+  // quantum 32 (absorbs outward-rounding jitter in bit_len).
+  const bool funnel = std::getenv("AX_FUNNEL") != nullptr;
+  const int entry_prec = std::getenv("AX_ENTRY_PREC")
+                             ? std::atoi(std::getenv("AX_ENTRY_PREC"))
+                             : 200;
+  constexpr long kTargetSlack = 96, kReconGuard = 64, kQuantum = 32;
+  int prec_next = entry_prec;
+
   a2::rx::init(nprimes, 160);
   core::birth_impl<a2::rx, a2::rx, a2::Exact2> b(tb, in, c);
   for (int s = 1; s <= steps; ++s) {
@@ -133,7 +151,9 @@ int main(int argc, char** argv) {
     // history, not on prec at that step: two runs entered step 7 at
     // prec 773 and only the one with the tighter earlier schedule
     // decided it.
-    ax::dyi::prec = s <= 8 ? 120 + 80 * s : 2000 << (s - 8);
+    ax::dyi::prec = funnel ? prec_next
+                           : (s <= 8 ? 120 + 80 * s : 2000 << (s - 8));
+    a2::rx::sn = {};  // per-step sensor reset
 #ifdef AX_ANCHOR2_TRACE
     if (prec_override) ax::dyi::prec = prec_override;
 #endif
@@ -145,14 +165,27 @@ int main(int argc, char** argv) {
                                       t0)
             .count();
     const auto& fb = a2::rx::fb;
+    const auto& sn = a2::rx::sn;
+    const bool sensed = sn.min_slack != (1L << 30);
+    if (funnel) {  // the pinned law — see block comment above
+      const long S = sensed ? sn.min_slack : 0;
+      long want = ax::dyi::prec - S + kTargetSlack;
+      if (sn.max_den_bits > 0)
+        want = std::max(want, sn.max_den_bits + kReconGuard);
+      prec_next = int(std::max(64L, ((want + kQuantum - 1) / kQuantum) *
+                                        kQuantum));
+    }
     std::printf(
         "{\"step\":%d,\"loss\":%lld,\"digest\":\"%s\",\"fb\":{"
         "\"eq_zero\":%ld,\"floor_exact\":%ld,\"floor_near\":%ld,"
         "\"cmp\":%ld,\"recon\":%ld,\"cache_hit\":%ld},"
-        "\"prec\":%d,\"wall_s\":%.3f}\n",
+        "\"sense\":{\"min_slack\":%ld,\"max_wint_bits\":%ld,"
+        "\"max_den_bits\":%ld},"
+        "\"prec\":%d,\"prec_next\":%d,\"wall_s\":%.3f}\n",
         s, (long long)b.last_loss(), dig.c_str(), fb.eq_zero,
         fb.floor_exact, fb.floor_near, fb.cmp, fb.recon, fb.cache_hit,
-        ax::dyi::prec, dt);
+        sensed ? sn.min_slack : -1, sn.max_wint_bits, sn.max_den_bits,
+        ax::dyi::prec, funnel ? prec_next : -1, dt);
     std::fflush(stdout);
     if (dump) {
       const auto g9 = b.weights_grain9();
