@@ -201,10 +201,39 @@ struct rx {
                : std::strong_ordering::greater;
   }
 
-  /** DECLARED floor conversion (seams + de-grain); the shadow is a
-      point integer at every conversion site by construction */
+  /** the declared exact floor, shadow-decided when possible;
+      straddles go through the pin-2 site cache then reconstruction
+      (classified floor-exact / floor-near, pin 4) */
+  ax::bigint floor_decl() const {
+    const auto [fl, fh] = sh.floor_pair();
+    if (fl == fh) return fl;
+    const std::uint64_t key = hash_res();
+    const auto it = site_cache.find(key);
+    if (it != site_cache.end() && it->second.res == res) {
+      fb.cache_hit++;
+      return it->second.fl;
+    }
+    const ax::rational v = reconstruct_rat();
+    const auto [q, r] = ax::bigint::divmod(v.num(), v.den());
+    ax::bigint f = q;
+    if (v.num().is_negative() && !r.is_zero()) f = f - ax::bigint(1);
+    if (r.is_zero()) fb.floor_exact++; else fb.floor_near++;
+    site_cache[key] = {res, f};
+    return f;
+  }
+  std::uint64_t hash_res() const {  // FNV-1a over residue words
+    std::uint64_t h = 1469598103934665603ull;
+    for (const std::uint64_t w : res)
+      for (int b = 0; b < 8; ++b) {
+        h ^= (w >> (8 * b)) & 0xff;
+        h *= 1099511628211ull;
+      }
+    return h;
+  }
+
+  /** DECLARED floor conversion (frozen-grain seams + de-grain) */
   explicit operator long long() const {
-    return std::stoll(sh.point_int().to_string());
+    return std::stoll(floor_decl().to_string());
   }
   explicit operator long() const {
     return (long)static_cast<long long>(*this);
@@ -214,16 +243,6 @@ struct rx {
 /** Zero value-rounding policy over rx: div exact (modular inverse +
     interval division), to_grain the declared exact floor. */
 struct Exact2 {
-  static std::uint64_t res_hash(const rx& s) {  // FNV-1a over words
-    std::uint64_t h = 1469598103934665603ull;
-    for (const std::uint64_t w : s.res)
-      for (int b = 0; b < 8; ++b) {
-        h ^= (w >> (8 * b)) & 0xff;
-        h *= 1099511628211ull;
-      }
-    return h;
-  }
-
   static rx div(const rx& x, const rx& d) {
     ax::dyi dsh = d.sh;
     if (dsh.contains_zero()) {
@@ -256,25 +275,7 @@ struct Exact2 {
 
   static rx to_grain(const rx& x, int gshift) {
     const rx s = gshift ? (x >> gshift) : x;
-    const auto [fl, fh] = s.sh.floor_pair();
-    if (fl == fh) return rx::from_int(fl);  // shadow decides
-    // straddle: pin-2 site cache, then reconstruction
-    const std::uint64_t key = res_hash(s);
-    const auto it = rx::site_cache.find(key);
-    if (it != rx::site_cache.end() && it->second.res == s.res) {
-      rx::fb.cache_hit++;
-      return rx::from_int(it->second.fl);
-    }
-    const ax::rational v = s.reconstruct_rat();
-    const auto [q, r] = ax::bigint::divmod(v.num(), v.den());
-    ax::bigint f = q;
-    if (v.num().is_negative() && !r.is_zero()) f = f - ax::bigint(1);
-    if (r.is_zero())
-      rx::fb.floor_exact++;  // exactly ON the grain integer
-    else
-      rx::fb.floor_near++;
-    rx::site_cache[key] = {s.res, f};
-    return rx::from_int(f);
+    return rx::from_int(s.floor_decl());
   }
   static rx from_grain(const rx& x, int gshift) {
     return gshift ? (x << gshift) : x;
