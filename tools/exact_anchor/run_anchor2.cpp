@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
   a2::rx::init(nprimes, 160);
   core::birth_impl<a2::rx, a2::rx, a2::Exact2> b(tb, in, c);
   for (int s = 1; s <= steps; ++s) {
-    ax::dyi::prec = 120 + 40 * s;  // pin 3: growing shadow
+    ax::dyi::prec = 120 + 80 * s;  // pin 3: growing shadow (80b/step: the tie-distance exponent shrinks ~60b/step at d64)
     const auto t0 = std::chrono::steady_clock::now();
     b.run(1);
     const std::string dig = b.mark();
