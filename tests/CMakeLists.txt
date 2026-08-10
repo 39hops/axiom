@@ -18,6 +18,7 @@ add_executable(ax_tests
   core/bigint_gcd_pow_test.cpp
   core/rational_test.cpp
   core/dyadic_test.cpp
+  core/rns_test.cpp
   core/nt_test.cpp
   core/fft_test.cpp
   la/mat_test.cpp
