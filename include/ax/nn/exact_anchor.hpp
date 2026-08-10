@@ -73,9 +73,11 @@ struct exr {
   explicit exr(ax::rational r) : v(std::move(r)) { guard(); }
 
   void guard() const {
-    // cache keyed on the ceiling so runtime changes take effect
-    static unsigned cached = 0;
-    static ax::bigint ceil_big;
+    // cache keyed on the ceiling so runtime changes take effect;
+    // thread_local per the anchor-v2 Tier-1 gate — no shared mutable
+    // state when instances run concurrently
+    thread_local unsigned cached = 0;
+    thread_local ax::bigint ceil_big;
     if (cached != bit_ceiling) {
       ceil_big = ax::bigint(1) << bit_ceiling;
       cached = bit_ceiling;
