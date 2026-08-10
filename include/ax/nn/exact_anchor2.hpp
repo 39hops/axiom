@@ -49,6 +49,17 @@ struct fb_counters {
   long cache_hit = 0;    // pin-2 site-cache hits
 };
 
+/** FUNNEL-PREC sensors (PRE-REG FUNNEL-PREC, relay 2026-08-10-16):
+    per-step quantities the closed-loop driver may read at
+    schedule-decision time. Driver resets with `sn = {}` at step
+    start. min_slack is the funnel distance: bits by which the
+    shadow width at the worst floor site stayed below one unit. */
+struct sense_t {
+  long min_slack = 1L << 30;  // min over floor sites of -(width exp)
+  long max_wint_bits = 0;     // max bit_len(fh-fl) over straddles
+  long max_den_bits = 0;      // max reconstructed denominator bits
+};
+
 struct rx {
   // empty res == canonical exact zero (gemm fills vectors of Op
   // before assignment; the lazy form keeps that cheap)
@@ -58,6 +69,7 @@ struct rx {
 
   static inline ax::rns::ctx ctx;
   static inline fb_counters fb;
+  static inline sense_t sn;
   struct cache_ent {
     std::vector<std::uint64_t> res;
     ax::bigint fl;
@@ -69,6 +81,7 @@ struct rx {
     ctx = ax::rns::ctx::make(nprimes);
     ax::dyi::prec = prec_bits;
     fb = {};
+    sn = {};
     site_cache.clear();
   }
 
@@ -130,6 +143,10 @@ struct rx {
     const std::vector<std::uint8_t> ok =
         okm.empty() ? std::vector<std::uint8_t>(ctx.P.size(), 1) : okm;
     const auto rec = ax::rns::reconstruct(res, ok, ctx);
+    if (rec.ok) {
+      const long db = ax::dyi::bit_len(rec.v.den());
+      if (db > sn.max_den_bits) sn.max_den_bits = db;
+    }
     if (!rec.ok) {
 #ifdef AX_ANCHOR2_TRACE
       trace_site("MODULUS EXHAUSTED");
@@ -239,7 +256,18 @@ struct rx {
       (classified floor-exact / floor-near, pin 4) */
   ax::bigint floor_decl() const {
     const auto [fl, fh] = sh.floor_pair();
+    {  // funnel sensor: dyadic width at every floor site
+      const ax::bigint w = sh.hi - sh.lo;
+      if (!w.is_zero()) {
+        const long slack = -(long(sh.e) + ax::dyi::bit_len(w));
+        if (slack < sn.min_slack) sn.min_slack = slack;
+      }
+    }
     if (fl == fh) return fl;
+    {
+      const long wb = ax::dyi::bit_len(fh - fl);
+      if (wb > sn.max_wint_bits) sn.max_wint_bits = wb;
+    }
 #ifdef AX_ANCHOR2_TRACE
     if (trace_budget > 0) { trace_budget--; trace_site("STRADDLE"); }
 #endif
