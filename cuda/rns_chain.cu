@@ -16,7 +16,7 @@
  *                     Choreography is our own; the house Triton reference
  *                     (scratch/ozaki_fused.py) is absent from this repo,
  *                     so nothing is ported - receipt cites this.
- *   rns_naive_gemm  - same product via direct __int128 mulmod; on-device
+ *   rns_naive_gemm  - same product via direct mulmod-ladder; on-device
  *                     bit-equality cross-check arm for the slice kernel.
  *   crt_exit_fused  - fused CRT exit: Garner mixed-radix per element, then
  *                     double-double (two-sum/two-prod) recombination and a
@@ -36,8 +36,10 @@
 #include <vector>
 
 using u64 = std::uint64_t;
-using u128 = unsigned __int128;
 using i64 = long long;
+// No __int128 anywhere: the house leg builds with nvcc + MSVC host, which
+// lacks it. mulmod is a shift-add (peasant) ladder over addmod - portable,
+// slower; the receipt states it so wall numbers are read accordingly.
 
 #define CUDA_CHECK(x)                                                      \
   do {                                                                     \
@@ -51,7 +53,20 @@ using i64 = long long;
 
 // ----- host-side number theory (self-contained; ax lib not linked) -----
 
-static u64 h_mulmod(u64 a, u64 b, u64 p) { return (u64)((u128)a * b % p); }
+static u64 h_addmod(u64 a, u64 b, u64 p) {
+  u64 s = a + b;  // both < 2^61
+  return s >= p ? s - p : s;
+}
+
+static u64 h_mulmod(u64 a, u64 b, u64 p) {
+  u64 r = 0;
+  a %= p;
+  for (b %= p; b; b >>= 1) {
+    if (b & 1) r = h_addmod(r, a, p);
+    a = h_addmod(a, a, p);
+  }
+  return r;
+}
 
 static u64 h_powmod(u64 a, u64 e, u64 p) {
   u64 r = 1 % p;
@@ -106,13 +121,19 @@ constexpr int kMaxCh = 8;
 __constant__ u64 c_primes[kMaxCh];
 __constant__ u64 c_pow2mod[kMaxCh][16];  // 2^(8s) mod p, s in [0,16)
 
-__device__ __forceinline__ u64 d_mulmod(u64 a, u64 b, u64 p) {
-  return (u64)((u128)a * b % p);
-}
-
 __device__ __forceinline__ u64 d_addmod(u64 a, u64 b, u64 p) {
   u64 s = a + b;  // both < 2^61
   return s >= p ? s - p : s;
+}
+
+__device__ __forceinline__ u64 d_mulmod(u64 a, u64 b, u64 p) {
+  u64 r = 0;
+  a %= p;
+  for (b %= p; b; b >>= 1) {
+    if (b & 1) r = d_addmod(r, a, p);
+    a = d_addmod(a, a, p);
+  }
+  return r;
 }
 
 // int8-slice GEMM in one RNS channel. A: MxK, B: KxN residues of channel ch.
