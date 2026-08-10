@@ -96,14 +96,15 @@ struct rx {
   }
 
   /** the fallback court: CRT + rational reconstruction, loud */
-  ax::rational reconstruct_rat() const {
+  ax::rational reconstruct_rat(const char* why = "?") const {
     if (res.empty()) return ax::rational(ax::bigint(0));
     fb.recon++;
     const std::vector<std::uint8_t> ok =
         okm.empty() ? std::vector<std::uint8_t>(ctx.P.size(), 1) : okm;
     const auto rec = ax::rns::reconstruct(res, ok, ctx);
     if (!rec.ok)
-      throw std::runtime_error("anchor2: modulus exhausted");
+      throw std::runtime_error(
+          std::string("anchor2: modulus exhausted (site ") + why + ")");
     return rec.v;
   }
 
@@ -185,7 +186,7 @@ struct rx {
     }
     if (clean >= 3) return true;
     fb.eq_zero++;  // pole-starved: reconstruct to be sure
-    return reconstruct_rat().num().is_zero();
+    return reconstruct_rat("eq-zero").num().is_zero();
   }
   friend bool operator==(const rx& a, const rx& b) {
     return (a - b).is_zero();
@@ -196,7 +197,7 @@ struct rx {
     const rx d = a - b;
     if (d.is_zero()) return std::strong_ordering::equal;
     fb.cmp++;
-    return d.reconstruct_rat().num().is_negative()
+    return d.reconstruct_rat("cmp").num().is_negative()
                ? std::strong_ordering::less
                : std::strong_ordering::greater;
   }
@@ -225,7 +226,7 @@ struct rx {
       fb.cache_hit++;
       return it->second.fl;
     }
-    const ax::rational v = reconstruct_rat();
+    const ax::rational v = reconstruct_rat("floor");
     const auto [q, r] = ax::bigint::divmod(v.num(), v.den());
     ax::bigint f = q;
     if (v.num().is_negative() && !r.is_zero()) f = f - ax::bigint(1);
@@ -262,7 +263,7 @@ struct Exact2 {
       // first (loud), then reconstruct a tight point interval
       if (d.is_zero())
         throw std::runtime_error("anchor2: division by exact zero");
-      const ax::rational dr = d.reconstruct_rat();
+      const ax::rational dr = d.reconstruct_rat("div");
       dsh = ax::dyi::div(ax::dyi(dr.num(), 0), ax::dyi(dr.den(), 0));
     }
     rx r;

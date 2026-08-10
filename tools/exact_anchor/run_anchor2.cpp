@@ -98,7 +98,7 @@ static std::string slurp(const char* p) {
 
 int main(int argc, char** argv) {
   const int steps = argc > 1 ? std::atoi(argv[1]) : 12;
-  const int nprimes = argc > 2 ? std::atoi(argv[2]) : 64;
+  const int nprimes = argc > 2 ? std::atoi(argv[2]) : 256;
   core::birth_cfg_t c = tiny_cfg();
   std::string tb, in;
   if (argc > 4) {  // d64-class r2b contract defaults (ib::contract)
@@ -111,10 +111,10 @@ int main(int argc, char** argv) {
   }
   const char* dump = argc > 5 ? argv[5] : nullptr;
 
-  a2::rx::init(nprimes, 70);
+  a2::rx::init(nprimes, 160);
   core::birth_impl<a2::rx, a2::rx, a2::Exact2> b(tb, in, c);
   for (int s = 1; s <= steps; ++s) {
-    ax::dyi::prec = 50 + 20 * s;  // pin 3: growing shadow
+    ax::dyi::prec = 120 + 40 * s;  // pin 3: growing shadow
     const auto t0 = std::chrono::steady_clock::now();
     b.run(1);
     const std::string dig = b.mark();
