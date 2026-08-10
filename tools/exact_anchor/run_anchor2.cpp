@@ -14,6 +14,7 @@
       c++ -std=c++20 -O2 -Iinclude tools/exact_anchor/run_anchor2.cpp \
         build/libaxiom.a -o /tmp/run_anchor2 */
 #include <chrono>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -118,7 +119,8 @@ int main(int argc, char** argv) {
     // pin 3, measured rate: floor-tie distance exponents at d64 fit
     // ~21*1.5^N (358 @ step 7, 798 @ step 9) — geometric, so the
     // shadow schedule is geometric with ~2x margin
-    ax::dyi::prec = 90 + int(40.0 * std::pow(1.5, s));
+    ax::dyi::prec = std::max(120 + 80 * s,
+                             90 + int(40.0 * std::pow(1.5, s)));
     const auto t0 = std::chrono::steady_clock::now();
     b.run(1);
     const std::string dig = b.mark();
