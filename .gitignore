@@ -14,5 +14,12 @@ o.err
 logs/
 *.log
 __pycache__/
+# macOS finder metadata
+.DS_Store
+# compiled python extension modules
+*.so
+# anchor-v2 run outputs (regenerable via tools/exact_anchor/run_anchor2)
+# — probe_d64/*.w9 are committed receipts and stay tracked
+tools/exact_anchor/anchor2_d64/*.w9
 !data/priors/
 !data/priors/**
