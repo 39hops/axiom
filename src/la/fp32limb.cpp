@@ -1,5 +1,6 @@
 #include <ax/la/fp32limb.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -82,7 +83,43 @@ std::vector<float> exp_add_capped(std::vector<float> e, float x,
   return out;
 }
 sliced slice_row(const float* x, int n) {
-  throw std::runtime_error("unimplemented");
+  if (n < 1 || n > BLOCK) throw std::runtime_error("fp32limb: bad window");
+  sliced out;
+  // align to the window's max exponent: frexp(max|x|) so scaled values
+  // land in (-1, 1] before slicing (house alignment, per-window)
+  float mx = 0.0f;
+  for (int k = 0; k < n; ++k) {
+    if (!std::isfinite(x[k]))
+      throw std::runtime_error("fp32limb: non-finite input");
+    mx = std::max(mx, std::fabs(x[k]));
+  }
+  out.e_align = 0;
+  if (mx != 0.0f) std::frexp(mx, &out.e_align);
+  // residuals in double: exact. Each element carries only 24 significant
+  // bits (spread shifts the exponent, never widens the significand), and
+  // every step is a power-of-two scale, an integer round, or a suffix-
+  // extracting subtract — all exact in a 53-bit significand.
+  std::vector<double> r(static_cast<std::size_t>(n));
+  for (int k = 0; k < n; ++k)
+    r[static_cast<std::size_t>(k)] =
+        std::ldexp(static_cast<double>(x[k]), -out.e_align);
+  const double sc = std::ldexp(1.0, SLICE_W);
+  bool nonzero = true;
+  for (int p = 0; p < MAX_SLICES && nonzero; ++p) {
+    std::vector<float> q(static_cast<std::size_t>(n));
+    nonzero = false;
+    for (int k = 0; k < n; ++k) {
+      auto& rk = r[static_cast<std::size_t>(k)];
+      const double scaled = rk * sc;
+      const double Q = std::nearbyint(scaled);
+      rk = scaled - Q;
+      q[static_cast<std::size_t>(k)] = static_cast<float>(Q);
+      if (rk != 0.0) nonzero = true;
+    }
+    out.sl.push_back(std::move(q));
+  }
+  if (nonzero) throw std::runtime_error("fp32limb: envelope");
+  return out;
 }
 std::vector<dyadic> gemm_fp32limb(const matf& A, const matf& B) {
   throw std::runtime_error("unimplemented");

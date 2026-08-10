@@ -103,3 +103,51 @@ TEST(fp32limb_eft, capped_expansion_triple_double_ok_and_overflow_throws) {
   EXPECT_THROW(exp_add_capped(std::move(e), std::ldexp(1.0f, -30), 3),
                std::runtime_error);
 }
+
+namespace {
+// reconstruct element k of a sliced segment as an exact dyadic
+dyadic reconstruct(const sliced& s, int k) {
+  dyadic r{bigint(0), 0};
+  for (std::size_t p = 0; p < s.sl.size(); ++p) {
+    const dyadic d = decode(s.sl[p][k]);
+    acc(r, d.m, d.e - SLICE_W * (int(p) + 1) + s.e_align);
+  }
+  return r;
+}
+}  // namespace
+
+TEST(fp32limb_slice, reconstructs_random_window_exactly) {
+  ax::st::rng g(11);
+  std::vector<float> x(BLOCK);
+  for (auto& v : x) v = static_cast<float>(g.uniform(-1.0, 1.0));
+  const sliced s = slice_row(x.data(), BLOCK);
+  for (int k = 0; k < BLOCK; ++k)
+    EXPECT_TRUE(dyadic_eq(reconstruct(s, k), decode(x[k]))) << "k=" << k;
+}
+
+TEST(fp32limb_slice, uniform_exponent_needs_few_slices) {
+  // all elements in [1, 2): 24 mantissa bits / 7 -> 4 slices suffice
+  ax::st::rng g(12);
+  std::vector<float> x(BLOCK);
+  for (auto& v : x) v = static_cast<float>(g.uniform(1.0, 2.0));
+  EXPECT_LE(slice_row(x.data(), BLOCK).sl.size(), 4u);
+}
+
+TEST(fp32limb_slice, zero_window_and_short_window) {
+  std::vector<float> z(BLOCK, 0.0f);
+  const sliced s = slice_row(z.data(), 4);
+  ASSERT_GE(s.sl.size(), 1u);
+  for (int k = 0; k < 4; ++k) EXPECT_EQ(s.sl[0][k], 0.0f);
+}
+
+TEST(fp32limb_slice, wide_exponent_spread_is_loud_envelope_reject) {
+  // full-mantissa element at spread 40: lowest bit lands at 2^-64, below
+  // the MAX_SLICES*SLICE_W = 56-bit envelope -> must throw, in Release
+  // builds too (fence is a throw, not an assert). Note a SINGLE-bit
+  // element at 2^-40 is exactly representable and rightly accepted.
+  std::vector<float> x(BLOCK, 0.0f);
+  x[0] = 1.0f;
+  x[1] = std::ldexp(1.0f + std::ldexp(1.0f, -23), -40);
+  EXPECT_NO_THROW(slice_row(x.data(), 1));  // alone it aligns fine
+  EXPECT_THROW(slice_row(x.data(), BLOCK), std::runtime_error);
+}
