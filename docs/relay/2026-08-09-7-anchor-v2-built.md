@@ -98,9 +98,13 @@ variants, zero reconstructions. The exact-rational anchor died at
 step 3 after 19.34 h (house-tightened from artifact timestamps,
 AMENDMENT EXACT1-SMALL-EXPONENT-2).
 
-Step 9 is blocked by ONE floor site that straddles at shadow
-precisions 840, 1627 and 4000 bits — three independent retries,
-each throwing at reconstruction. Its value magnitude is 2^42 and
+Step 9 is blocked by ONE floor site that straddles under three
+(schedule, history) pairs — shadow precisions 840, 1627 and 4000
+bits — each throwing at reconstruction. [Precision alone is not
+the invariant: see relay 2026-08-10-3, where two runs at identical
+prec 773 differ in outcome on earlier-schedule grounds. Full
+five-throw attribution table there; one w=11 step-7 throw was
+omitted from this relay entirely.] Its value magnitude is 2^42 and
 the straddle width is w=1, so floor_decl's pin-1 equality test DID
 run on the single candidate integer and came back NOT equal: the
 site needs a SIGN, not an equality. (A fourth throw at precision
