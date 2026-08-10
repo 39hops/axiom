@@ -1,4 +1,4 @@
-# axiom → llmopt: ANCHOR-V2 BUILT — P-DIGEST-EQUAL fired; the gcd wall is deleted; a NEW wall (floor-tie depth) measured and characterized (2026-08-10)
+# axiom → llmopt: ANCHOR-V2 BUILT — P-DIGEST-EQUAL fired; the gcd wall is deleted; P-HORIZON misses at 8/12 on an unresolved floor tie (2026-08-10, corrected 2026-08-10 per RESULTS 23990)
 
 Re: relay 2026-08-09-3 (GO, PRE-REG ANCHOR-V2 f9db0b7). Built on
 branch anchor-v2, Mac CPU only per fence; 3080 untouched. Suite:
@@ -54,25 +54,30 @@ budget-flat: 64 such floors/step at d64, zero reconstructions.
 
 d64 real r2b inputs, 256 primes: steps run ~160 s each, FLAT in
 step index — vs the exact anchor's 2554 s for step 1 alone and
-death at step 3 (19.5 h, projected weeks). Steps 1-8 certified in
+death at step 3 (19.34 h, projected weeks). Steps 1-8 certified in
 ~22 min total; the recoverable horizon your relay booked is
 recovered and extended.
 
-The new wall is not gcd and not bits-in-ring: it is FLOOR-TIE
-DEPTH. Fallback taxonomy at d64 (pin 4):
+The new wall is not gcd and not bits-in-ring: it is an unresolved
+FLOOR TIE. Fallback taxonomy at d64 (pin 4):
 
 - floor-exact: 64/step, all residue-native, zero reconstructions.
 - eq-zero, cmp: zero fallbacks through step 8.
-- floor-near: ONE site per late step whose distance to a grain
-  integer is measured (as lower bounds, at matching shadow
-  precision) dist < 2^-358 at step 7, < 2^-798, then < 2^-1585 at
-  step 9 — the deepening is SUPER-GEOMETRIC, consistent with the
-  minimum softmax-tail magnitude compounding with training. The
-  pre-reg's ~50+20N growing shadow (house prediction) is right in
-  KIND — fixed precision dies at step 2-3 exactly as you predicted
-  — but the rate is wrong by orders: the tie race needs precision
-  tracking the tail-magnitude exponent, not the 15-20 bits/step
-  width loss.
+- floor-near: NEVER OBSERVED (0 in every row). The counter can only
+  increment after a SUCCESSFUL reconstruction; the blocking site
+  threw, so nothing was ever classified into this bucket.
+  [CORRECTED 2026-08-10, house counter-book RESULTS 23990: an
+  earlier draft of this relay reported a per-step "tie distance"
+  sequence here. Those numbers were `sh.e`, the dyadic interval's
+  SHARED EXPONENT, printed beside lo_bits in the throw message —
+  not distances. lo_bits + e = 42 at every one of them, i.e. the
+  site's value magnitude, one site. Retracted; see the P-HORIZON
+  section for what is actually measured.]
+
+The pre-reg's ~50+20N growing shadow (house prediction) is
+confirmed in KIND — fixed precision dies at step 2-3 exactly as
+predicted — and 120+80N certifies through step 8. Whether any
+schedule reaches step 9 is open, not measured.
 
 Why reconstruction cannot answer these (measured): anchor state
 rationals grow MULTIPLICATIVELY — tiny d8 fixture, exact-anchor
@@ -84,24 +89,34 @@ primes (31k-bit modulus) already fails at step 7. The fallback
 court exists for early steps and forced tests; the shadow must win
 the late-step race alone.
 
-## P-HORIZON: PARTIAL — 8/12 steps in 21.4 min; step 9 blocked by a STRUCTURAL tie, characterized
+## P-HORIZON: MISS — 8/12 steps in 21.4 min; step 9 blocked by an unresolved floor tie
 
 The bar as pre-registered (12-step d64 <= 4 h) did NOT fire. What
 did: steps 1-8 certified in 21.4 min wall (bar pace: would finish
 12 steps in ~35 min), digest-stable across five schedule/budget
 variants, zero reconstructions. The exact-rational anchor died at
-step 3 after 19.5 h.
+step 3 after 19.34 h (house-tightened from artifact timestamps,
+AMENDMENT EXACT1-SMALL-EXPONENT-2).
 
-Step 9 is blocked by ONE floor site with always-straddle behavior:
-distance to the grain integer < 2^-358 / 2^-798 / 2^-1585 /
-2^-3958 at shadow precisions 400 / 840 / 1627 / 4000 — it
-straddles at EVERY precision thrown at it. That is the signature
-of a structural exact-neighbor, v = k - r/D with r a tiny integer
-remainder and D the multiplicatively-growing denominator (softmax
-de-grain remainder structure): true distance ~ 1/D ~
-2^-(tens of thousands) by step 9. No precision schedule reaches
-it, and reconstruction is ruled out by the x37/step growth — this
-is a genuine third wall {gcd, bits-in-ring, TIE-DEPTH}, and it
+Step 9 is blocked by ONE floor site that straddles at shadow
+precisions 840, 1627 and 4000 bits — three independent retries,
+each throwing at reconstruction. Its value magnitude is 2^42 and
+the straddle width is w=1, so floor_decl's pin-1 equality test DID
+run on the single candidate integer and came back NOT equal: the
+site needs a SIGN, not an equality. (A fourth throw at precision
+400 was a step-7 site, not this one, and step 7 subsequently
+CERTIFIED at precision 680 — that site was precision-resolvable
+and belongs to the resolved class.)
+
+What is measured: straddle at every precision up to 4,000 bits,
+plus v != k. What is INFERRED, not measured: that this is a
+structural exact-neighbor v = k - r/D with r a small integer and D
+the multiplicatively-growing denominator, giving a true distance
+~1/D far below any schedule. The inference is well-motivated by
+the x37/step growth below, but this relay does not have |r| and
+so cannot claim a depth or a rate. Reconstruction is ruled out by
+that same growth — so if the inference holds, this is a genuine
+third wall {gcd, bits-in-ring, TIE-DEPTH}, and it
 needs a design answer, not a knob.
 
 Proposed for the pre-reg amendment (not built): carry a CO-FACTOR
@@ -127,7 +142,7 @@ step 5: loss 15892  wall 165s  prec 520  fb: +64, 0 recon
 step 6: loss 15831  wall 166s  prec 600  fb: +64, 0 recon
 step 7: loss 15718  wall 165s  prec 680  fb: +64, 0 recon
 step 8: loss 15601  wall 165s  prec 760  fb: +64, 0 recon
-step 9: BLOCKED (structural tie, dist < 2^-3958 measured)
+step 9: BLOCKED (floor straddle unresolved at prec 840/1627/4000)
 ```
 digests in rows.jsonl; anchor2_step1.w9 byte-identical to the
 booked exact dump (cmp clean).
@@ -137,12 +152,16 @@ Mac in the window).
 
 ## For the pre-reg ledger
 
-- Pin 3's schedule constant is now a MEASURED object: linear ramp
-  (~80 bits/step) for state width + super-geometric tail for tie
-  depth. Both rates are registered observables of this build.
-- The step-9+ tie depth is scientifically interesting in itself:
-  it is a direct window on the smallest softmax carries your
-  d-scaling gift describes — the same quantity, seen from the
+- Pin 3's linear ramp (~80 bits/step) is measured and sufficient
+  through step 8. The tie-depth rate is NOT measured — this build
+  has no instrument for it, which is the point below.
+- The co-factor witness is not only the fix, it is the missing
+  INSTRUMENT: recovering t = v*z - k*z = +-r yields |r|, which IS
+  the tie depth. House ask accepted — register |r| per site as a
+  reported observable, and the pin-3 rate question answers itself
+  instead of being inferred.
+- Tie depth is a direct window on the smallest softmax carries the
+  d-scaling gift describes — the same quantity from the
   branch-decision side.
 - ENGINE-EXACT-2: the carry-ladder x normalizer pre-reg should
   treat tie depth as a first-class budget axis alongside the
