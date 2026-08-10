@@ -140,6 +140,9 @@ target_link_libraries(axiom-nn-exact PRIVATE axiom)
 add_executable(axiom-nn-greedy tools/nn_greedy_main.cpp)
 target_link_libraries(axiom-nn-greedy PRIVATE axiom)
 
+add_executable(axiom-rnschain-c1 tools/rnschain/c1_chain_oracle.cpp)
+target_link_libraries(axiom-rnschain-c1 PRIVATE axiom)
+
 add_executable(axiom-nn-moe-greedy tools/nn_moe_greedy_main.cpp)
 target_link_libraries(axiom-nn-moe-greedy PRIVATE axiom)
 
