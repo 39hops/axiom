@@ -207,6 +207,18 @@ struct rx {
   ax::bigint floor_decl() const {
     const auto [fl, fh] = sh.floor_pair();
     if (fl == fh) return fl;
+    // exact-boundary class (the probe's dominant straddle): if an
+    // integer inside the straddle EQUALS the value, the floor is
+    // that integer — decidable residue-natively (pin 1), no
+    // reconstruction, no prime-budget growth with the prefix
+    if (fh - fl <= ax::bigint(4)) {
+      for (ax::bigint k = fl + ax::bigint(1); !(fh < k);
+           k = k + ax::bigint(1))
+        if ((*this - from_int(k)).is_zero()) {
+          fb.floor_exact++;
+          return k;
+        }
+    }
     const std::uint64_t key = hash_res();
     const auto it = site_cache.find(key);
     if (it != site_cache.end() && it->second.res == res) {

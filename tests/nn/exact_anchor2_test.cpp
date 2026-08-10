@@ -41,19 +41,19 @@ TEST(Anchor2Scalar, ForcedFloorFallbackClassifiesAndCaches) {
   rx::init(8, 4);  // starved shadow: force straddles
   const rx t = a2::Exact2::div(rx(1), rx(3));
   const rx one = t + t + t;  // exactly 1, interval straddles it
-  const long fe0 = rx::fb.floor_exact;
+  const long fe0 = rx::fb.floor_exact, rc0 = rx::fb.recon;
   EXPECT_EQ((long long)a2::Exact2::to_grain(one, 0), 1);
   EXPECT_EQ(rx::fb.floor_exact, fe0 + 1);
-  // same residue value again: pin-2 cache, no second reconstruction
-  const long rc = rx::fb.recon, ch = rx::fb.cache_hit;
-  EXPECT_EQ((long long)a2::Exact2::to_grain(one, 0), 1);
-  EXPECT_EQ(rx::fb.recon, rc);
-  EXPECT_EQ(rx::fb.cache_hit, ch + 1);
-  // near-boundary class
+  EXPECT_EQ(rx::fb.recon, rc0);  // residue-native: NO reconstruction
+  // near-boundary class reconstructs once, then hits the pin-2 cache
   const rx near = one + (rx(1) >> 30);
   const long fn0 = rx::fb.floor_near;
   EXPECT_EQ((long long)a2::Exact2::to_grain(near, 0), 1);
   EXPECT_EQ(rx::fb.floor_near, fn0 + 1);
+  const long rc = rx::fb.recon, ch = rx::fb.cache_hit;
+  EXPECT_EQ((long long)a2::Exact2::to_grain(near, 0), 1);
+  EXPECT_EQ(rx::fb.recon, rc);
+  EXPECT_EQ(rx::fb.cache_hit, ch + 1);
 }
 
 namespace {
