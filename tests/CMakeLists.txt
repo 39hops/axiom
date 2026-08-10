@@ -23,6 +23,7 @@ add_executable(ax_tests
   core/fft_test.cpp
   la/mat_test.cpp
   la/matmul_test.cpp
+  la/fp32limb_test.cpp
   la/lu_test.cpp
   la/cholesky_test.cpp
   la/qr_test.cpp

@@ -10,6 +10,7 @@ add_library(axiom STATIC
   src/core/nt.cpp
   src/core/fft.cpp
   src/la/blas.cpp
+  src/la/fp32limb.cpp
   src/la/decomp.cpp
   src/st/rng.cpp
   src/st/sf.cpp
