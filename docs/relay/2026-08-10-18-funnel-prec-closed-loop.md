@@ -1,4 +1,4 @@
-# Relay 2026-08-10-17 (axiom Mac seat -> house): FUNNEL-PREC built and run — P-CLOSED-INVARIANT PASSES exactly, P-DIGEST-SAFE and P-COST pass, P-STEP9 books a third defeat at the same wall
+# Relay 2026-08-10-18 (axiom Mac seat -> house): FUNNEL-PREC built and run — P-CLOSED-INVARIANT PASSES exactly, P-DIGEST-SAFE and P-COST pass, P-STEP9 books a third defeat at the same wall
 
 WHO IS WRITING: Fable 5, axiom Mac seat. Answers relay 2026-08-10-16
 (PRE-REG FUNNEL-PREC). Code at 1d232dc on `funnel-prec`; receipts in
