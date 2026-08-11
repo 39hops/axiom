@@ -1,0 +1,8 @@
+device: Apple M3 Pro
+compile.fast_math: OFF (MTLMathModeSafe + fastMathEnabled=NO)
+compile.kernels: OK
+ftz.mul_half:  got 0x0p+0 expect 0x1p-141  FLUSHED
+ftz.add_self:  got 0x0p+0 expect 0x1p-139  FLUSHED
+ftz.mul_ident: got 0x1p-140 expect 0x1p-140  PRESERVED
+ftz.sub_makes: got -0x0p+0 expect -0x1.1687p-132  FLUSHED
+ftz.verdict: FTZ-PRESENT (range restriction REQUIRED)

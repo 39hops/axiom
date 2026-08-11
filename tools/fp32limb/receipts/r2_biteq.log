@@ -1,0 +1,6 @@
+device: Apple M3 Pro
+compile.fast_math: OFF (MTLMathModeSafe + fastMathEnabled=NO)
+compile.kernels: OK
+biteq seed=1 n=64 BIT-IDENTICAL (bad=0)
+biteq seed=2 n=64 BIT-IDENTICAL (bad=0)
+biteq seed=3 n=64 BIT-IDENTICAL (bad=0)

@@ -1,0 +1,6 @@
+device: Apple M3 Pro
+compile.fast_math: OFF (MTLMathModeSafe + fastMathEnabled=NO)
+compile.kernels: OK
+wall.cpu_fp64:  median 0.3062s spread 0.0181s
+wall.fp32limb:  median 0.0366s spread 0.0215s ratio 0.120x PASS<=1.07
+wall.intacc:    median 0.0011s spread 0.0007s ratio 0.004x PASS<=1.07
