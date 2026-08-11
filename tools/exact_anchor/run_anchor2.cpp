@@ -120,6 +120,13 @@ int main(int argc, char** argv) {
     a2::rx::trace_budget = std::atol(t);
   const int prec_override =
       std::getenv("AX_PREC") ? std::atoi(std::getenv("AX_PREC")) : 0;
+  // STEP9-CLIFF-SIZE (PRE-REG, RESULTS 25887): AX_PREC_STEP gates the
+  // override to steps >= N so the ladder can pay the rung price at
+  // step 9 only while steps 1..8 stay on the shipped ramp. Default 1
+  // keeps the original all-steps override semantics.
+  const int prec_from = std::getenv("AX_PREC_STEP")
+                            ? std::atoi(std::getenv("AX_PREC_STEP"))
+                            : 1;
 #endif
   // FUNNEL-PREC closed loop (PRE-REG FUNNEL-PREC, relay
   // 2026-08-10-16). AX_FUNNEL=1 enables it; AX_ENTRY_PREC sets the
@@ -155,7 +162,7 @@ int main(int argc, char** argv) {
                            : (s <= 8 ? 120 + 80 * s : 2000 << (s - 8));
     a2::rx::sn = {};  // per-step sensor reset
 #ifdef AX_ANCHOR2_TRACE
-    if (prec_override) ax::dyi::prec = prec_override;
+    if (prec_override && s >= prec_from) ax::dyi::prec = prec_override;
 #endif
     const auto t0 = std::chrono::steady_clock::now();
     b.run(1);
