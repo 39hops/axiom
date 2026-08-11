@@ -1,0 +1,13 @@
+== anchor2 trace [MODULUS EXHAUSTED] ==
+  0   run_anchor2_trace                   0x0000000100ede764 _ZN2ax2nn2ib7anchor22rx10trace_siteEPKc + 60
+  1   run_anchor2_trace                   0x0000000100edd140 _ZNK2ax2nn2ib7anchor22rx15reconstruct_ratEPKc + 468
+  2   run_anchor2_trace                   0x0000000100ee2ad4 _ZNK2ax2nn2ib7anchor22rx10floor_declEv + 1540
+  3   run_anchor2_trace                   0x0000000100ee2430 _ZNK2ax2nn2ib7anchor22rxcvxEv + 24
+  4   run_anchor2_trace                   0x0000000100ee2190 _ZN2ax2nn2ib4core6narrowIxNS1_7anchor22rxEEET_T0_ + 244
+  5   run_anchor2_trace                   0x0000000100edf388 _ZN2ax2nn2ib4core7rms_fwdINS1_7anchor22rxES5_NS4_6Exact2EEENSt3__16vectorIT_NS7_9allocatorIS9_EEEERKSC_SE_RNS8_IxNSA_IxEEEEiiS9_x + 476
+  6   run_anchor2_trace                   0x0000000100ed6d10 _ZN2ax2nn2ib4core8fwd_headINS1_7anchor22rxES5_NS4_6Exact2EEENSt3__16vectorIT_NS7_9allocatorIS9_EEEERKNS7_3mapINS7_12basic_stringIcNS7_11char_traitsIcEENSA_IcEEEESC_NS7_4lessISI_EENSA_INS7_4pairIKSI_SC_EEEEEERKSC_RNS2_7cache_tIS9_EERKNS2_3envIS9_EE + 140
+  7   run_anchor2_trace                   0x0000000100ed218c _ZN2ax2nn2ib4core10birth_implINS1_7anchor22rxES5_NS4_6Exact2EE9step_onceEv + 1240
+  8   run_anchor2_trace                   0x0000000100ecd630 main + 3860
+  9   dyld                                0x0000000190c6dd54 start + 7184
+libc++abi: terminating due to uncaught exception of type std::runtime_error: anchor2: modulus exhausted (site floor w=1 lo_bits=16384 e=-16342)
+EXIT:134
