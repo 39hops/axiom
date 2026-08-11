@@ -60,6 +60,31 @@ struct sense_t {
   long max_den_bits = 0;      // max reconstructed denominator bits
 };
 
+#ifdef AX_ANCHOR2_TRACE
+/** LEDGER CENSUS (PRE-REG COFACTOR-WITNESS-2 arm 1, relay
+    2026-08-11-0): per-step census of divisor sites in Exact2::div.
+    Probe-only; the default build is byte-untouched. D' is booked
+    gcd-free as a bit-length ledger, bracketed two ways:
+      dp_bits_distinct — sum of bit lengths over DISTINCT non-dyadic
+        divisor values this step (lower ledger: each site value
+        contributes once);
+      dp_bits_all — sum over EVERY non-dyadic division event
+        (upper ledger: a scalar path cannot pass more divisors
+        than there are division events).
+    Dyadic divisors (power-of-two point values) are exempt by the
+    pre-reg (cleared by shifts, no gcd tension); wide-shadow
+    divisors (interval not a point) are counted separately and
+    conservatively folded into both ledgers via their hi bound. */
+struct ledger_t {
+  long div_dyadic = 0, div_nondyadic = 0, div_wide = 0;
+  long dp_bits_distinct = 0, dp_bits_all = 0;
+  long max_div_bits = 0;
+  std::unordered_map<std::uint64_t, long> distinct;
+};
+inline ledger_t lg;
+
+#endif
+
 struct rx {
   // empty res == canonical exact zero (gemm fills vectors of Op
   // before assignment; the lazy form keeps that cheap)
@@ -342,6 +367,35 @@ struct rx {
     interval division), to_grain the declared exact floor. */
 struct Exact2 {
   static rx div(const rx& x, const rx& d) {
+#ifdef AX_ANCHOR2_TRACE
+    {  // LEDGER CENSUS: classify the divisor before any work
+      const ax::dyi& s = d.sh;
+      const ax::bigint mlo = ax::abs(s.lo), mhi = ax::abs(s.hi);
+      if (s.lo == s.hi) {
+        const int b = ax::dyi::bit_len(mlo);
+        const bool pow2 =
+            b > 0 && mlo == (ax::bigint(1) << unsigned(b - 1));
+        if (pow2) {
+          lg.div_dyadic++;
+        } else {
+          lg.div_nondyadic++;
+          const long bits = long(b) + (s.e > 0 ? s.e : 0);
+          lg.dp_bits_all += bits;
+          if (bits > lg.max_div_bits) lg.max_div_bits = bits;
+          if (lg.distinct.emplace(d.hash_res(), bits).second)
+            lg.dp_bits_distinct += bits;
+        }
+      } else {  // wide shadow: conservative, hi-bound bits
+        lg.div_wide++;
+        const long bits =
+            long(ax::dyi::bit_len(mhi)) + (s.e > 0 ? s.e : 0);
+        lg.dp_bits_all += bits;
+        if (bits > lg.max_div_bits) lg.max_div_bits = bits;
+        if (lg.distinct.emplace(d.hash_res(), bits).second)
+          lg.dp_bits_distinct += bits;
+      }
+    }
+#endif
     ax::dyi dsh = d.sh;
     if (dsh.contains_zero()) {
       // shadow can't certify the divisor's sign: exact-zero check

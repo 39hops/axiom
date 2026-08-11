@@ -165,7 +165,39 @@ int main(int argc, char** argv) {
     if (prec_override && s >= prec_from) ax::dyi::prec = prec_override;
 #endif
     const auto t0 = std::chrono::steady_clock::now();
+#ifdef AX_ANCHOR2_TRACE
+    // LEDGER CENSUS (COFACTOR-WITNESS-2 arm 1): per-step divisor
+    // ledger, printed even when the step throws — the partial
+    // step-9 ledger is the bar quantity (D' up to the throw point).
+    static long cum_distinct = 0, cum_all = 0;
+    a2::lg = {};
+    const auto ledger_row = [&](const char* outcome) {
+      const auto& lg = a2::lg;
+      cum_distinct += lg.dp_bits_distinct;
+      cum_all += lg.dp_bits_all;
+      std::fprintf(
+          stderr,
+          "{\"ev\":\"ledger\",\"step\":%d,\"outcome\":\"%s\","
+          "\"div_dyadic\":%ld,\"div_nondyadic\":%ld,\"div_wide\":%ld,"
+          "\"distinct\":%zu,\"max_div_bits\":%ld,"
+          "\"dp_bits_distinct_step\":%ld,\"dp_bits_distinct_cum\":%ld,"
+          "\"dp_bits_all_step\":%ld,\"dp_bits_all_cum\":%ld}\n",
+          s, outcome, lg.div_dyadic, lg.div_nondyadic, lg.div_wide,
+          lg.distinct.size(), lg.max_div_bits, lg.dp_bits_distinct,
+          cum_distinct, lg.dp_bits_all, cum_all);
+      std::fflush(stderr);
+    };
+    try {
+      b.run(1);
+    } catch (const std::exception& ex) {
+      ledger_row("throw");
+      std::fprintf(stderr, "step %d threw: %s\n", s, ex.what());
+      return 134;
+    }
+    ledger_row("ok");
+#else
     b.run(1);
+#endif
     const std::string dig = b.mark();
     const double dt =
         std::chrono::duration<double>(std::chrono::steady_clock::now() -
